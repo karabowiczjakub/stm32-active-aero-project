@@ -91,20 +91,20 @@ static void CAN_Test_Init(void)
   sFilterConfig.FilterType = FDCAN_FILTER_MASK;
   sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   sFilterConfig.FilterID1 = 0x000;
-  sFilterConfig.FilterID2 = 0x000;   // maska 0 = przyjmij wszystkie ID
+  sFilterConfig.FilterID2 = 0x000;   
 
   if (HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK)
   {
     Error_Handler();
   }
 
-  // Filtr dla rozszerzonych ramek 29-bit, tylko jeśli w CubeMX dałeś Ext Filters Nbr = 1
+  
   sFilterConfig.IdType = FDCAN_EXTENDED_ID;
   sFilterConfig.FilterIndex = 0;
   sFilterConfig.FilterType = FDCAN_FILTER_MASK;
   sFilterConfig.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
   sFilterConfig.FilterID1 = 0x00000000;
-  sFilterConfig.FilterID2 = 0x00000000;   // maska 0 = przyjmij wszystkie ID
+  sFilterConfig.FilterID2 = 0x00000000; 
 
   if (HAL_FDCAN_ConfigFilter(&hfdcan1, &sFilterConfig) != HAL_OK)
   {
@@ -259,21 +259,21 @@ static void CAN_Send_OBD_Request(uint8_t pid)
 
 
 
-//algorytm sterowania skrzydłem
+//wing angle determination algorithm
 
 #define SPEED_REQUEST_PERIOD_MS        500U
 #define MIN_SPEED_SAMPLE_DT_MS         300U
 
 /*
- * OPEN = redukcja oporu.
- * Wlaczamy dopiero powyzej 55 km/h,
- * wylaczamy dopiero ponizej 45 km/h.
+ * OPEN = drag reduction.
+ * 2 state upper limit 55 km/h,
+ * 2 state lower limit 45 km/h.
  */
 #define OPEN_ON_SPEED_KMH              55U
 #define OPEN_OFF_SPEED_KMH             45U
 
 /*
- * Jednostka: 0.1 km/h/s
+ * acceleration unit: 0.1 km/h/s
  *
  * 25 = 2.5 km/h/s
  * 55 = 5.5 km/h/s
@@ -284,20 +284,18 @@ static void CAN_Send_OBD_Request(uint8_t pid)
 #define OPEN_DECEL_BLOCK_X10           20
 
 /*
- * AIR_BRAKE ponizej tej predkosci nie ma duzego sensu.
+ * AIR_BRAKE lower limit
  */
 #define AIR_BRAKE_MIN_SPEED_KMH        40U
 
 /*
- * Po AIR_BRAKE wymuszamy NORMAL przez kilka probek.
- * Przy probkowaniu 500 ms:
- * 3 probki = okolo 1.5 s.
+ * upholding NORMAL state after braking.
+ * sampling : 500 ms:
+ * 3 samples = okolo 1.5 s.
  */
 #define POST_BRAKE_NORMAL_SAMPLES      3U
 
-/*
- * OPEN dopiero po kilku kolejnych probkach bez wyraznego zwalniania.
- */
+
 #define OPEN_STABLE_SAMPLES            3U
 
 typedef enum
@@ -325,7 +323,7 @@ static uint8_t post_brake_normal_samples = 0;
 static uint8_t open_stable_samples = 0;
 
 
-//funkcje pomocnicze
+//support functions
 
 
 static const char* WingState_ToString(WingState_t state)
@@ -357,12 +355,7 @@ static void Print_Signed_X10(int32_t value_x10)
 static int32_t RateX10_To_mG(int32_t rate_x10)
 {
   /*
-   * rate_x10: jednostka 0.1 km/h/s
-   *
-   * 1 g = okolo 35.3 km/h/s
-   *
-   * wynik: milli-g
-   * np. -110 oznacza -0.110 g
+g - forces calculation
    */
   return (rate_x10 * 1000L) / 353L;
 }
@@ -390,13 +383,12 @@ static void Print_Signed_mG_As_G(int32_t value_mg)
 #define SERVO_MAX_PULSE_US        2000U
 
 /*
- * Znaczenie aerodynamiczne:
+ * STATE EXPLENATION:
  *
- * OPEN       = maly kat / okolo 0 stopni / redukcja oporu
- * NORMAL     = lekki kat natarcia / generowanie docisku
- * AIR_BRAKE  = najwiekszy kat / maksymalny opor
- *
- * Uwaga: to sa wartosci robocze. Po montazu mechaniki dobierzemy je dokladnie.
+ * OPEN       = 0 degrees, drag reduction
+ * NORMAL     = small angle of attack (to be determined)
+ * AIR_BRAKE  = large angle of attach (to be determined), maximasez drag
+ 
  */
 #define SERVO_OPEN_PULSE_US       1500U
 #define SERVO_NORMAL_PULSE_US     1700U
@@ -465,7 +457,7 @@ static void Servo_UpdateWingStateIfChanged(WingState_t new_state)
 //
 //
 //
-//Algorytm
+//Algorithm
 
 static void Control_Update_From_Speed(uint8_t speed_kmh)
 {
@@ -502,8 +494,7 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   int16_t delta_speed = (int16_t)speed_kmh - (int16_t)prev_speed_kmh;
 
   /*
-   * rate_x10 = zmiana predkosci w 0.1 km/h/s
-   * np. 39 oznacza 3.9 km/h/s
+   * rate_x10 = change of speed in 0.1 km/h/s
    */
   int32_t rate_x10 = ((int32_t)delta_speed * 10000L) / (int32_t)dt_ms;
   int32_t accel_mg = RateX10_To_mG(rate_x10);
@@ -511,10 +502,7 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   uint8_t brake_detected = 0;
   uint8_t open_allowed_by_decel = 0;
 
-  /*
-   * AIR_BRAKE tylko przy mocniejszym hamowaniu
-   * i przy sensownej predkosci.
-   */
+  
   if (rate_x10 <= -BRAKE_ON_THRESHOLD_X10 &&
       speed_kmh >= AIR_BRAKE_MIN_SPEED_KMH)
   {
@@ -522,11 +510,8 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   }
 
   /*
-   * OPEN moze sie wlaczyc tylko wtedy,
-   * gdy nie zwalniamy wyraznie.
-   *
-   * Dopuszczamy male wahania, np. -1.9 km/h/s,
-   * bo PID predkosci ma rozdzielczosc 1 km/h.
+
+   OPEN is allowed only when ther is little to no speed decrease (IMU to be added)
    */
   if (rate_x10 >= -OPEN_DECEL_BLOCK_X10)
   {
@@ -547,12 +532,12 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   }
 
   /*
-   * Logika stanow:
+   * STATE LOGIC:
    *
-   * 1. Mocne hamowanie -> AIR_BRAKE
-   * 2. Koniec hamowania -> od razu NORMAL
-   * 3. Po AIR_BRAKE blokujemy OPEN przez kilka probek
-   * 4. OPEN wlaczamy dopiero po kilku probkach bez zwalniania
+   * 1. Braking -> AIR_BRAKE
+   * 2. End of braking -> comes back to NORMAL
+   * 3. After AIR_BRAKE NORMAL is enforced for number of samples
+   * 4. OPEN is activated only if ther is no deceleration 
    */
 
   if (brake_detected)
@@ -564,10 +549,7 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   }
   else if (wing_state == WING_AIR_BRAKE)
   {
-    /*
-     * Tu NIE trzymamy AIR_BRAKE.
-     * Skoro hamowanie juz nie jest wykryte, natychmiast wracamy do NORMAL.
-     */
+
     wing_state = WING_NORMAL;
 
     post_brake_normal_samples = POST_BRAKE_NORMAL_SAMPLES;
@@ -575,10 +557,7 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
   }
   else if (post_brake_normal_samples > 0)
   {
-    /*
-     * Po AIR_BRAKE przez kilka probek wymuszamy NORMAL,
-     * zeby nie bylo przejscia AIR_BRAKE -> OPEN.
-     */
+
     wing_state = WING_NORMAL;
     post_brake_normal_samples--;
 
@@ -618,9 +597,8 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
     else
     {
       /*
-       * Strefa histerezy 45-55 km/h.
-       * Jesli juz bylo OPEN i nie zwalniamy wyraznie, mozemy je utrzymac.
-       * Jesli nie bylo OPEN, zostajemy w NORMAL.
+       * 2 state regulation zone 45-55 km/h.
+ 
        */
       if (wing_state == WING_OPEN && open_allowed_by_decel)
       {
@@ -661,7 +639,7 @@ static void Control_Update_From_Speed(uint8_t speed_kmh)
 
 //
 //
-// Wywołanie
+// CALL OUT
 
 static void CAN_Poll_Rx(void)
 {
@@ -809,7 +787,7 @@ int main(void)
 
 
 
-/*
+/* This fragment is used for checking the serwo connection
 	  Servo_SetPulseUs(SERVO_OPEN_PULSE_US);
 	  printf("SERVO TEST: 1500 us\r\n");
 	  HAL_Delay(2000);
