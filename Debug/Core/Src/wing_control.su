@@ -1,0 +1,3 @@
+../Core/Src/wing_control.c:83:16:RateX10_To_mG	16	static
+../Core/Src/wing_control.c:93:6:Control_ForceNormalForCorner	8	static
+../Core/Src/wing_control.c:120:6:Control_Update_From_Speed	88	static

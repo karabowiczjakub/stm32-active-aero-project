@@ -1,0 +1,14 @@
+../Core/Src/imu.c:45:26:LSM6DSO_ReadReg	32	static
+../Core/Src/imu.c:63:26:LSM6DSO_WriteReg	32	static
+../Core/Src/imu.c:81:26:LSM6DSO_ReadMulti	32	static
+../Core/Src/imu.c:100:16:LSM6DSO_AccelRaw_To_mG	16	static
+../Core/Src/imu.c:109:9:LSM6DSO_Init	32	static
+../Core/Src/imu.c:220:16:LSM6DSO_ReadAccel_mG	40	static
+../Core/Src/imu.c:277:13:LSM6DSO_PrintAccelInline	24	static
+../Core/Src/imu.c:365:16:Abs32	16	static
+../Core/Src/imu.c:377:16:IMU_SelectAxis_mG	24	static
+../Core/Src/imu.c:402:13:IMU_UpdateCornerDetection	24	static
+../Core/Src/imu.c:548:6:IMU_Task	8	static
+../Core/Src/imu.c:567:6:IMU_PrintCornerInline	8	static
+../Core/Src/imu.c:606:9:IMU_IsCornerDetected	4	static
+../Core/Src/imu.c:613:9:IMU_TakeCornerDetectedEvent	16	static

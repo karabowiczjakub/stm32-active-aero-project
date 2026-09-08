@@ -1,0 +1,8 @@
+../Core/Src/obd.c:21:16:FDCAN_DLC_ToBytes	16	static
+../Core/Src/obd.c:61:6:CAN_Test_Init	40	static
+../Core/Src/obd.c:166:13:CAN_Send_Test_Frame	56	static
+../Core/Src/obd.c:237:13:CAN_Send_OBD_RPM_Request	56	static
+../Core/Src/obd.c:302:13:CAN_Send_OBD_Speed_Request	56	static
+../Core/Src/obd.c:361:13:CAN_Send_OBD_Accelerator_Request	56	static
+../Core/Src/obd.c:420:6:CAN_Send_OBD_Request	64	static
+../Core/Src/obd.c:489:6:CAN_Poll_Rx	64	static

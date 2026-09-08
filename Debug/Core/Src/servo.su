@@ -1,0 +1,5 @@
+../Core/Src/servo.c:50:13:Servo_SetPulseUs	16	static
+../Core/Src/servo.c:75:6:Servo_SetWingState	16	static
+../Core/Src/servo.c:106:6:Servo_Init	8	static
+../Core/Src/servo.c:122:6:Servo_UpdateWingStateIfChanged	16	static
+../Core/Src/servo.c:142:10:Servo_GetCurrentPulseUs	4	static
