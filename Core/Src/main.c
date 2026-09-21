@@ -37,7 +37,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SPEED_REQUEST_PERIOD_MS 500U
+#define SPEED_REQUEST_PERIOD_MS 50U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -164,6 +164,7 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
       IMU_Task();
 
       if (IMU_TakeCornerDetectedEvent())
@@ -198,6 +199,19 @@ int main(void)
 
 
       HAL_Delay(10);
+/*
+	    Servo_SetWingState(WING_NORMAL);
+	    printf("TEST: NORMAL\r\n");
+	    HAL_Delay(2000);
+
+	    Servo_SetWingState(WING_OPEN);
+	    printf("TEST: OPEN\r\n");
+	    HAL_Delay(2000);
+
+	    Servo_SetWingState(WING_AIR_BRAKE);
+	    printf("TEST: AIR_BRAKE\r\n");
+	    HAL_Delay(2000);
+*/
 
 
     /* USER CODE END WHILE */

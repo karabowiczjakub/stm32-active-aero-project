@@ -34,10 +34,9 @@ extern TIM_HandleTypeDef htim2;
 
 
 /* Pozycje skrzydła */
-#define SERVO_OPEN_PULSE_US         1500U
-#define SERVO_NORMAL_PULSE_US       1700U
-#define SERVO_AIR_BRAKE_PULSE_US    2000U
-
+#define SERVO_OPEN_PULSE_US         1900U
+#define SERVO_NORMAL_PULSE_US       1600U
+#define SERVO_AIR_BRAKE_PULSE_US    1100U
 
 static uint16_t servo_current_pulse_us = SERVO_OPEN_PULSE_US;
 

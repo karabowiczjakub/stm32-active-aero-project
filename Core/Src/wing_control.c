@@ -23,7 +23,7 @@
  * =========================
  */
 
-#define MIN_SPEED_SAMPLE_DT_MS        300U
+#define MIN_SPEED_SAMPLE_DT_MS        40U
 
 #define OPEN_ON_SPEED_KMH             55U
 
