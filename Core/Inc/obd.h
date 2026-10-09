@@ -18,7 +18,10 @@ void CAN_Send_OBD_Request(
 );
 
 void CAN_Poll_Rx(void);
+void CAN_Process_Rx(void);
 
+uint8_t CAN_Is_OBD_RequestPending(void);
+void CAN_Check_OBD_RequestTimeout(void);
 
 #endif /* OBD_H_ */
 

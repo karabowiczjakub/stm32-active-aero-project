@@ -16,7 +16,27 @@
 
 extern FDCAN_HandleTypeDef hfdcan1;
 
+#define CAN_RX_QUEUE_SIZE 8U
+#define OBD_RESPONSE_TIMEOUT_MS 200U
 
+
+typedef struct
+{
+    FDCAN_RxHeaderTypeDef header;
+    uint8_t data[8];
+
+} CAN_RxFrame_t;
+
+
+static CAN_RxFrame_t can_rx_queue[CAN_RX_QUEUE_SIZE];
+
+static volatile uint8_t can_rx_head = 0U;
+static volatile uint8_t can_rx_tail = 0U;
+
+static volatile uint32_t can_rx_overflow_count = 0U;
+
+static volatile uint8_t obd_request_pending = 0U;
+static uint32_t obd_request_sent_tick = 0U;
 
 static uint8_t FDCAN_DLC_ToBytes(
     uint32_t dlc
@@ -154,6 +174,13 @@ void CAN_Test_Init(void)
         Error_Handler();
     }
 
+    if (HAL_FDCAN_ActivateNotification(
+            &hfdcan1,
+            FDCAN_IT_RX_FIFO0_NEW_MESSAGE,
+            0U) != HAL_OK)
+    {
+        Error_Handler();
+    }
 
 
     printf(
@@ -477,10 +504,10 @@ void CAN_Send_OBD_Request(
     }
     else
     {
-        printf(
-            "REQ PID=0x%02X\r\n",
-            pid
-        );
+    	obd_request_pending = 1U;
+    	    obd_request_sent_tick = HAL_GetTick();
+
+    	    printf("REQ PID=0x%02X\r\n", pid);
     }
 }
 
@@ -530,13 +557,11 @@ void CAN_Poll_Rx(void)
                 rxData[2] == 0x0D
             )
             {
-                uint8_t speed_kmh =
-                    rxData[3];
+            	uint8_t speed_kmh = rxData[3];
 
+            	obd_request_pending = 0U;
 
-                Control_Update_From_Speed(
-                    speed_kmh
-                );
+            	Control_Update_From_Speed(speed_kmh);
             }
 
 
@@ -566,3 +591,167 @@ void CAN_Poll_Rx(void)
         }
     }
 }
+
+
+
+
+void HAL_FDCAN_RxFifo0Callback(
+    FDCAN_HandleTypeDef *hfdcan,
+    uint32_t RxFifo0ITs)
+{
+    if (hfdcan->Instance != FDCAN1)
+    {
+        return;
+    }
+
+    if ((RxFifo0ITs &
+         FDCAN_IT_RX_FIFO0_NEW_MESSAGE) == 0U)
+    {
+        return;
+    }
+
+    FDCAN_RxHeaderTypeDef rx_header;
+    uint8_t rx_data[8];
+
+
+    if (HAL_FDCAN_GetRxMessage(
+            hfdcan,
+            FDCAN_RX_FIFO0,
+            &rx_header,
+            rx_data) != HAL_OK)
+    {
+        return;
+    }
+
+
+    uint8_t next_head =
+        (uint8_t)(
+            (can_rx_head + 1U) %
+            CAN_RX_QUEUE_SIZE
+        );
+
+
+    /*
+     * Jesli next_head == tail,
+     * kolejka jest pelna.
+     */
+    if (next_head == can_rx_tail)
+    {
+        can_rx_overflow_count++;
+        return;
+    }
+
+
+    can_rx_queue[can_rx_head].header =
+        rx_header;
+
+
+    for (uint8_t i = 0U; i < 8U; i++)
+    {
+        can_rx_queue[can_rx_head].data[i] =
+            rx_data[i];
+    }
+
+
+    /*
+     * head zmieniamy dopiero po
+     * skopiowaniu calej ramki.
+     */
+    can_rx_head = next_head;
+}
+
+
+static void CAN_ProcessFrame(
+    const FDCAN_RxHeaderTypeDef *rx_header,
+    const uint8_t *rx_data)
+{
+    /*
+     * Standardowa odpowiedz ECU:
+     *
+     * ID: 0x7E8 ... 0x7EF
+     *
+     * DATA:
+     * [0] = 0x03
+     * [1] = 0x41
+     * [2] = 0x0D
+     * [3] = SPEED
+     */
+
+    if (rx_header->IdType != FDCAN_STANDARD_ID)
+    {
+        return;
+    }
+
+
+    if (rx_header->Identifier < 0x7E8U ||
+        rx_header->Identifier > 0x7EFU)
+    {
+        return;
+    }
+
+
+    if (rx_data[1] != 0x41U)
+    {
+        return;
+    }
+
+
+    if (rx_data[2] != 0x0DU)
+    {
+        return;
+    }
+
+    uint8_t speed_kmh = rx_data[3];
+
+    obd_request_pending = 0U;
+
+    Control_Update_From_Speed(
+        speed_kmh
+    );
+}
+
+
+void CAN_Process_Rx(void)
+{
+    while (can_rx_tail != can_rx_head)
+    {
+        CAN_RxFrame_t frame =
+            can_rx_queue[can_rx_tail];
+
+
+        can_rx_tail =
+            (uint8_t)(
+                (can_rx_tail + 1U) %
+                CAN_RX_QUEUE_SIZE
+            );
+
+
+        CAN_ProcessFrame(
+            &frame.header,
+            frame.data
+        );
+    }
+}
+
+
+uint8_t CAN_Is_OBD_RequestPending(void)
+{
+    return obd_request_pending;
+}
+
+
+void CAN_Check_OBD_RequestTimeout(void)
+{
+    if (obd_request_pending == 0U)
+    {
+        return;
+    }
+
+    if ((HAL_GetTick() - obd_request_sent_tick) >=
+        OBD_RESPONSE_TIMEOUT_MS)
+    {
+        obd_request_pending = 0U;
+    }
+}
+
+

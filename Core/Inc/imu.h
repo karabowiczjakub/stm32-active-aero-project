@@ -22,5 +22,6 @@
 
 	uint8_t IMU_TakeCornerDetectedEvent(void);
 
+	void IMU_RequestSample(void);
 
 #endif /* IMU_H_ */

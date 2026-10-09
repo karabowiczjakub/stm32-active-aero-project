@@ -35,12 +35,42 @@ extern I2C_HandleTypeDef hi2c1;
 
 #define LSM6DSO_OUTX_L_A          0x28
 
+#define LSM6DSO_STATUS_REG         0x1E
+#define LSM6DSO_STATUS_XLDA        0x01U
+
 
 
 static uint16_t lsm6dso_addr =
     LSM6DSO_ADDR_HIGH;
 
+static uint8_t imu_dma_buffer[6];
 
+static volatile uint8_t imu_dma_busy = 0U;
+static volatile uint8_t imu_sample_ready = 0U;
+
+
+
+static uint8_t imu_status_reg = 0U;
+
+static volatile uint8_t imu_read_due = 0U;
+static volatile uint8_t imu_accel_read_due = 0U;
+
+typedef enum
+{
+    IMU_DMA_NONE = 0,
+    IMU_DMA_STATUS,
+    IMU_DMA_ACCEL
+
+} ImuDmaTransfer_t;
+
+static volatile ImuDmaTransfer_t imu_dma_transfer =
+    IMU_DMA_NONE;
+
+
+void IMU_RequestSample(void)
+{
+    imu_read_due = 1U;
+}
 
 static HAL_StatusTypeDef LSM6DSO_ReadReg(
     uint8_t reg,
@@ -97,6 +127,36 @@ static HAL_StatusTypeDef LSM6DSO_ReadMulti(
 
 
 
+static uint8_t LSM6DSO_StartAccelRead_DMA(void)
+{
+    if (imu_dma_busy != 0U)
+    {
+        return 0U;
+    }
+
+    imu_dma_busy = 1U;
+    imu_dma_transfer = IMU_DMA_ACCEL;
+
+    if (HAL_I2C_Mem_Read_DMA(
+            &hi2c1,
+            lsm6dso_addr,
+            LSM6DSO_OUTX_L_A,
+            I2C_MEMADD_SIZE_8BIT,
+            imu_dma_buffer,
+            6U) != HAL_OK)
+    {
+        imu_dma_busy = 0U;
+        imu_dma_transfer = IMU_DMA_NONE;
+
+        return 0U;
+    }
+
+    return 1U;
+}
+
+
+
+
 static int32_t LSM6DSO_AccelRaw_To_mG(
     int16_t raw
 )
@@ -104,7 +164,32 @@ static int32_t LSM6DSO_AccelRaw_To_mG(
     return ((int32_t)raw * 61L) / 1000L;
 }
 
+static uint8_t LSM6DSO_StartStatusRead_DMA(void)
+{
+    if (imu_dma_busy != 0U)
+    {
+        return 0U;
+    }
 
+    imu_dma_busy = 1U;
+    imu_dma_transfer = IMU_DMA_STATUS;
+
+    if (HAL_I2C_Mem_Read_DMA(
+            &hi2c1,
+            lsm6dso_addr,
+            LSM6DSO_STATUS_REG,
+            I2C_MEMADD_SIZE_8BIT,
+            &imu_status_reg,
+            1U) != HAL_OK)
+    {
+        imu_dma_busy = 0U;
+        imu_dma_transfer = IMU_DMA_NONE;
+
+        return 0U;
+    }
+
+    return 1U;
+}
 
 uint8_t LSM6DSO_Init(void)
 {
@@ -401,29 +486,39 @@ static int32_t IMU_SelectAxis_mG(
 
 static void IMU_UpdateCornerDetection(void)
 {
-    int32_t ax = 0;
 
-    int32_t ay = 0;
+	int16_t raw_x =
+	    (int16_t)(
+	        ((uint16_t)imu_dma_buffer[1] << 8) |
+	        imu_dma_buffer[0]
+	    );
 
-    int32_t az = 0;
+	int16_t raw_y =
+	    (int16_t)(
+	        ((uint16_t)imu_dma_buffer[3] << 8) |
+	        imu_dma_buffer[2]
+	    );
+
+	int16_t raw_z =
+	    (int16_t)(
+	        ((uint16_t)imu_dma_buffer[5] << 8) |
+	        imu_dma_buffer[4]
+	    );
 
 
-    if (LSM6DSO_ReadAccel_mG(
-            &ax,
-            &ay,
-            &az
-        ) == 0)
-    {
-        return;
-    }
+	int32_t ax =
+	    LSM6DSO_AccelRaw_To_mG(raw_x);
+
+	int32_t ay =
+	    LSM6DSO_AccelRaw_To_mG(raw_y);
+
+	int32_t az =
+	    LSM6DSO_AccelRaw_To_mG(raw_z);
 
 
-    imu_ax_mg = ax;
-
-    imu_ay_mg = ay;
-
-    imu_az_mg = az;
-
+	imu_ax_mg = ax;
+	imu_ay_mg = ay;
+	imu_az_mg = az;
 
     imu_lateral_raw_mg =
         IMU_SelectAxis_mG(
@@ -544,25 +639,91 @@ static void IMU_UpdateCornerDetection(void)
 }
 
 
-
-void IMU_Task(void)
+void HAL_I2C_MemRxCpltCallback(
+    I2C_HandleTypeDef *hi2c)
 {
-    static uint32_t last_imu_sample = 0;
-
-
-    if (HAL_GetTick() -
-            last_imu_sample >=
-        IMU_SAMPLE_PERIOD_MS)
+    if (hi2c->Instance != I2C1)
     {
-        last_imu_sample =
-            HAL_GetTick();
+        return;
+    }
+
+    imu_dma_busy = 0U;
 
 
-        IMU_UpdateCornerDetection();
+    if (imu_dma_transfer == IMU_DMA_STATUS)
+    {
+        imu_dma_transfer = IMU_DMA_NONE;
+
+        /*
+         * XLDA = 1:
+         * akcelerometr ma nowa probke.
+         */
+        if ((imu_status_reg &
+             LSM6DSO_STATUS_XLDA) != 0U)
+        {
+            imu_accel_read_due = 1U;
+        }
+    }
+
+    else if (imu_dma_transfer == IMU_DMA_ACCEL)
+    {
+        imu_dma_transfer = IMU_DMA_NONE;
+
+
+        imu_sample_ready = 1U;
     }
 }
 
 
+void HAL_I2C_ErrorCallback(
+    I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1)
+    {
+        imu_dma_busy = 0U;
+        imu_dma_transfer = IMU_DMA_NONE;
+
+        imu_accel_read_due = 0U;
+    }
+}
+
+
+void IMU_Task(void)
+{
+
+    if (imu_sample_ready != 0U)
+    {
+        imu_sample_ready = 0U;
+
+        IMU_UpdateCornerDetection();
+    }
+
+
+
+    if (imu_dma_busy != 0U)
+    {
+        return;
+    }
+
+
+
+    if (imu_accel_read_due != 0U)
+    {
+        imu_accel_read_due = 0U;
+
+        LSM6DSO_StartAccelRead_DMA();
+
+        return;
+    }
+
+
+    if (imu_read_due != 0U)
+    {
+        imu_read_due = 0U;
+
+        LSM6DSO_StartStatusRead_DMA();
+    }
+}
 
 void IMU_PrintCornerInline(void)
 {

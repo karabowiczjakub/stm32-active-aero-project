@@ -23,30 +23,25 @@
  * =========================
  */
 
-#define MIN_SPEED_SAMPLE_DT_MS        40U
-
 #define OPEN_ON_SPEED_KMH             55U
-
 #define OPEN_OFF_SPEED_KMH            45U
-
 
 #define ACCEL_THRESHOLD_X10           25
 
 #define BRAKE_ON_THRESHOLD_X10        55
+#define BRAKE_OFF_THRESHOLD_X10       30
 
 #define OPEN_DECEL_BLOCK_X10          20
 
+#define AIR_BRAKE_MIN_SPEED_KMH       30U
 
-#define AIR_BRAKE_MIN_SPEED_KMH       40U
+#define OPEN_CONFIRM_MS               1000U
+#define POST_BRAKE_NORMAL_MS          1000U
 
-
-#define POST_BRAKE_NORMAL_SAMPLES     3U
-
-
-#define OPEN_STABLE_SAMPLES           3U
-
-
-
+#define SPEED_FILTER_WINDOW_MS        300U
+#define SPEED_FILTER_TOLERANCE_MS      30U
+#define SPEED_FILTER_MIN_SPAN_MS      250U
+#define SPEED_HISTORY_SIZE              8U
 typedef enum
 {
     MOTION_ACCELERATION = 0,
@@ -59,11 +54,7 @@ typedef enum
 
 
 
-static uint8_t prev_speed_kmh = 0;
 
-static uint32_t prev_speed_tick = 0;
-
-static uint8_t speed_initialized = 0;
 
 
 static MotionState_t motion_state =
@@ -74,9 +65,212 @@ static WingState_t wing_state =
     WING_NORMAL;
 
 
-static uint8_t post_brake_normal_samples = 0;
+static uint8_t post_brake_hold_active = 0U;
+static uint32_t post_brake_start_tick = 0U;
 
-static uint8_t open_stable_samples = 0;
+static uint8_t open_confirm_active = 0U;
+static uint32_t open_confirm_start_tick = 0U;
+
+
+typedef struct
+{
+    uint8_t speed_kmh;
+    uint32_t tick_ms;
+
+} SpeedSample_t;
+
+
+static SpeedSample_t speed_history[SPEED_HISTORY_SIZE];
+
+static uint8_t speed_history_head = 0U;
+static uint8_t speed_history_count = 0U;
+
+
+
+
+static void SpeedHistory_Add(
+    uint8_t speed_kmh,
+    uint32_t tick_ms)
+{
+    speed_history[speed_history_head].speed_kmh =
+        speed_kmh;
+
+    speed_history[speed_history_head].tick_ms =
+        tick_ms;
+
+    speed_history_head =
+        (uint8_t)(
+            (speed_history_head + 1U) %
+            SPEED_HISTORY_SIZE
+        );
+
+    if (speed_history_count < SPEED_HISTORY_SIZE)
+    {
+        speed_history_count++;
+    }
+}
+
+static uint8_t SpeedHistory_CalculateRateX10(
+    int32_t *rate_x10,
+    uint32_t *span_ms,
+    uint8_t *used_samples)
+{
+    if (speed_history_count < 2U)
+    {
+        return 0U;
+    }
+
+    uint8_t newest_index =
+        (uint8_t)(
+            (speed_history_head +
+             SPEED_HISTORY_SIZE - 1U) %
+            SPEED_HISTORY_SIZE
+        );
+
+    uint32_t newest_tick =
+        speed_history[newest_index].tick_ms;
+
+    /*
+     * Szukamy najstarszej probki,
+     * ktora nadal miesci sie w oknie ~300 ms.
+     */
+    uint8_t first_pos = 0xFFU;
+
+    for (uint8_t pos = 0U;
+         pos < speed_history_count;
+         pos++)
+    {
+        uint8_t index =
+            (uint8_t)(
+                (speed_history_head +
+                 SPEED_HISTORY_SIZE -
+                 speed_history_count +
+                 pos) %
+                SPEED_HISTORY_SIZE
+            );
+
+        uint32_t age_ms =
+            newest_tick -
+            speed_history[index].tick_ms;
+
+        if (age_ms <=
+            (SPEED_FILTER_WINDOW_MS +
+             SPEED_FILTER_TOLERANCE_MS))
+        {
+            first_pos = pos;
+            break;
+        }
+    }
+
+    if (first_pos == 0xFFU)
+    {
+        return 0U;
+    }
+
+    uint8_t oldest_index =
+        (uint8_t)(
+            (speed_history_head +
+             SPEED_HISTORY_SIZE -
+             speed_history_count +
+             first_pos) %
+            SPEED_HISTORY_SIZE
+        );
+
+    uint32_t oldest_tick =
+        speed_history[oldest_index].tick_ms;
+
+    uint32_t actual_span_ms =
+        newest_tick - oldest_tick;
+
+    if (actual_span_ms < SPEED_FILTER_MIN_SPAN_MS)
+    {
+        return 0U;
+    }
+
+    /*
+     * Regresja liniowa:
+     *
+     * v(t) = a*t + b
+     *
+     * Interesuje nas wspolczynnik a,
+     * czyli sredni trend predkosci.
+     */
+    int64_t sum_t = 0;
+    int64_t sum_v = 0;
+    int64_t sum_tv = 0;
+    int64_t sum_t2 = 0;
+
+    uint8_t n = 0U;
+
+    for (uint8_t pos = first_pos;
+         pos < speed_history_count;
+         pos++)
+    {
+        uint8_t index =
+            (uint8_t)(
+                (speed_history_head +
+                 SPEED_HISTORY_SIZE -
+                 speed_history_count +
+                 pos) %
+                SPEED_HISTORY_SIZE
+            );
+
+        int64_t t =
+            (int64_t)(
+                speed_history[index].tick_ms -
+                oldest_tick
+            );
+
+        int64_t v =
+            (int64_t)
+                speed_history[index].speed_kmh;
+
+        sum_t += t;
+        sum_v += v;
+        sum_tv += t * v;
+        sum_t2 += t * t;
+
+        n++;
+    }
+
+    if (n < 4U)
+    {
+        return 0U;
+    }
+
+    int64_t numerator =
+        ((int64_t)n * sum_tv) -
+        (sum_t * sum_v);
+
+    int64_t denominator =
+        ((int64_t)n * sum_t2) -
+        (sum_t * sum_t);
+
+    if (denominator == 0)
+    {
+        return 0U;
+    }
+
+    /*
+     * Nachylenie regresji jest w km/h/ms.
+     *
+     * Mnozenie przez 10000 daje:
+     * 0.1 km/h/s
+     *
+     * np. -55 = -5.5 km/h/s.
+     */
+    *rate_x10 =
+        (int32_t)(
+            (numerator * 10000LL) /
+            denominator
+        );
+
+    *span_ms = actual_span_ms;
+    *used_samples = n;
+
+    return 1U;
+}
+
 
 
 
@@ -92,15 +286,10 @@ static int32_t RateX10_To_mG(
 
 void Control_ForceNormalForCorner(void)
 {
-    wing_state =
-        WING_NORMAL;
+    wing_state = WING_NORMAL;
 
-
-    open_stable_samples = 0;
-
-
-    post_brake_normal_samples = 0;
-
+    open_confirm_active = 0U;
+    post_brake_hold_active = 0U;
 
     Servo_UpdateWingStateIfChanged(
         wing_state
@@ -117,135 +306,139 @@ void Control_ForceNormalForCorner(void)
  */
 
 
-void Control_Update_From_Speed(
-    uint8_t speed_kmh
-)
+void Control_Update_From_Speed(uint8_t speed_kmh)
 {
-    uint32_t now =
-        HAL_GetTick();
+    uint32_t now = HAL_GetTick();
+
+    /*
+     * Kazda odebrana probka trafia
+     * do przesuwnego bufora.
+     */
+    SpeedHistory_Add(
+        speed_kmh,
+        now
+    );
 
 
-    uint8_t corner_detected =
-        IMU_IsCornerDetected();
+    int32_t rate_x10 = 0;
+    uint32_t filter_span_ms = 0U;
+    uint8_t filter_samples = 0U;
 
 
-    if (speed_initialized == 0)
+    /*
+     * Filtrowany trend predkosci
+     * z wszystkich probek z ~300 ms.
+     */
+    uint8_t rate_valid =
+        SpeedHistory_CalculateRateX10(
+            &rate_x10,
+            &filter_span_ms,
+            &filter_samples
+        );
+
+
+    /*
+     * ==========================================
+     * ZAKRET - NAJWYZSZY PRIORYTET
+     * ==========================================
+     */
+    if (IMU_IsCornerDetected())
     {
-        speed_initialized = 1;
+        motion_state = MOTION_COASTING;
 
+        wing_state = WING_NORMAL;
 
-        prev_speed_kmh =
-            speed_kmh;
-
-
-        prev_speed_tick =
-            now;
-
-
-        motion_state =
-            MOTION_COASTING;
-
-
-        wing_state =
-            WING_NORMAL;
-
-
-        post_brake_normal_samples = 0;
-
-        open_stable_samples = 0;
-
+        open_confirm_active = 0U;
+        post_brake_hold_active = 0U;
 
         Servo_UpdateWingStateIfChanged(
             wing_state
         );
 
-
-        printf(
-            "SPEED=%u km/h | Acceleration=0 Coasting=1 Breaking=0 | WING=%s\r\n",
-            (unsigned int)speed_kmh,
-            WingState_ToString(wing_state)
-        );
-
-
         return;
     }
 
 
-
-    uint32_t dt_ms =
-        now - prev_speed_tick;
-
-
-    if (dt_ms <
-        MIN_SPEED_SAMPLE_DT_MS)
+    /*
+     * Jeszcze nie mamy wystarczajacej
+     * historii do wyznaczenia rate.
+     *
+     * Nie zmieniamy stanu skrzydla.
+     */
+    if (rate_valid == 0U)
     {
         return;
     }
-
-
-
-    int16_t delta_speed =
-        (int16_t)speed_kmh -
-        (int16_t)prev_speed_kmh;
-
-
-
-    int32_t rate_x10 =
-        (
-            (int32_t)delta_speed *
-            10000L
-        ) /
-        (int32_t)dt_ms;
-
 
 
     int32_t accel_mg =
-        RateX10_To_mG(
-            rate_x10
-        );
+        RateX10_To_mG(rate_x10);
 
 
-
-    uint8_t brake_detected = 0;
-
-    uint8_t open_allowed_by_decel = 0;
+    uint8_t brake_detected = 0U;
+    uint8_t open_allowed_by_decel = 0U;
 
 
-
-    if (rate_x10 <=
-            -BRAKE_ON_THRESHOLD_X10 &&
-
-        speed_kmh >=
-            AIR_BRAKE_MIN_SPEED_KMH &&
-
-        corner_detected == 0)
+    /*
+     * ==========================================
+     * HISTERеза AIR_BRAKE
+     * ==========================================
+     *
+     * Wejscie:
+     * rate <= -5.5 km/h/s
+     *
+     * Wyjscie:
+     * dopiero gdy rate > -3.0 km/h/s
+     *
+     * Jesli juz jestesmy AIR_BRAKE,
+     * stosujemy lagodniejszy prog OFF.
+     */
+    if (speed_kmh >= AIR_BRAKE_MIN_SPEED_KMH)
     {
-        brake_detected = 1;
+        if (wing_state == WING_AIR_BRAKE)
+        {
+            if (rate_x10 <=
+                -BRAKE_OFF_THRESHOLD_X10)
+            {
+                brake_detected = 1U;
+            }
+        }
+        else
+        {
+            if (rate_x10 <=
+                -BRAKE_ON_THRESHOLD_X10)
+            {
+                brake_detected = 1U;
+            }
+        }
     }
 
 
-
-    if (rate_x10 >=
-        -OPEN_DECEL_BLOCK_X10)
+    /*
+     * Warunek tylko do WEJSCIA
+     * NORMAL -> OPEN.
+     *
+     * Nie wyrzuca z istniejacego OPEN.
+     */
+    if (rate_x10 >= -OPEN_DECEL_BLOCK_X10)
     {
-        open_allowed_by_decel = 1;
+        open_allowed_by_decel = 1U;
     }
 
 
-
-    if (rate_x10 >=
-        ACCEL_THRESHOLD_X10)
+    /*
+     * Stan ruchu.
+     */
+    if (rate_x10 >= ACCEL_THRESHOLD_X10)
     {
         motion_state =
             MOTION_ACCELERATION;
     }
-
     else if (brake_detected)
     {
         motion_state =
             MOTION_BREAKING;
     }
-
     else
     {
         motion_state =
@@ -253,135 +446,213 @@ void Control_Update_From_Speed(
     }
 
 
+    /*
+     * ==========================================
+     * MASZYNA STANOW
+     * ==========================================
+     *
+     * CORNER:
+     *     -> NORMAL
+     *
+     * mocne hamowanie:
+     *     -> AIR_BRAKE
+     *
+     * koniec AIR_BRAKE:
+     *     -> NORMAL
+     *
+     * OPEN:
+     *     lekkie zwalnianie / coasting
+     *     nie powoduje wyjscia z OPEN
+     */
 
-    if (corner_detected)
-    {
-        wing_state =
-            WING_NORMAL;
 
-
-        open_stable_samples = 0;
-
-
-        post_brake_normal_samples = 0;
-    }
-
-
-    else if (brake_detected)
+    /*
+     * Mocne hamowanie.
+     */
+    if (brake_detected)
     {
         wing_state =
             WING_AIR_BRAKE;
 
+        /*
+         * Hold NORMAL zacznie sie dopiero
+         * po wyjsciu z AIR_BRAKE.
+         */
+        post_brake_hold_active = 0U;
 
-        post_brake_normal_samples =
-            POST_BRAKE_NORMAL_SAMPLES;
-
-
-        open_stable_samples = 0;
+        open_confirm_active = 0U;
     }
 
 
-    else if (wing_state ==
-             WING_AIR_BRAKE)
+    /*
+     * AIR_BRAKE wlasnie sie skonczyl.
+     *
+     * Zawsze:
+     *
+     * AIR_BRAKE -> NORMAL
+     */
+    else if (wing_state == WING_AIR_BRAKE)
     {
         wing_state =
             WING_NORMAL;
 
+        post_brake_hold_active = 1U;
+        post_brake_start_tick = now;
 
-        post_brake_normal_samples =
-            POST_BRAKE_NORMAL_SAMPLES;
-
-
-        open_stable_samples = 0;
+        open_confirm_active = 0U;
     }
 
 
-    else if (
-        post_brake_normal_samples > 0
-    )
+    /*
+     * Po AIR_BRAKE chwilowo blokujemy OPEN.
+     */
+    else if (post_brake_hold_active)
     {
-        wing_state =
-            WING_NORMAL;
-
-
-        post_brake_normal_samples--;
-
-
-        open_stable_samples = 0;
-    }
-
-
-    else
-    {
-        if (speed_kmh <=
-            OPEN_OFF_SPEED_KMH)
+        if ((uint32_t)(
+                now -
+                post_brake_start_tick
+            ) < POST_BRAKE_NORMAL_MS)
         {
             wing_state =
                 WING_NORMAL;
 
+            open_confirm_active = 0U;
+        }
+        else
+        {
+            /*
+             * Czas blokady zakonczony.
+             *
+             * W tej probce nadal zostajemy
+             * NORMAL. Od kolejnej probki
+             * moze rozpoczac sie potwierdzanie OPEN.
+             */
+            post_brake_hold_active = 0U;
 
-            open_stable_samples = 0;
+            wing_state =
+                WING_NORMAL;
+
+            open_confirm_active = 0U;
+        }
+    }
+
+
+    /*
+     * Jestesmy juz OPEN.
+     */
+    else if (wing_state == WING_OPEN)
+    {
+        /*
+         * Przy spadku ponizej dolnego
+         * progu predkosci wracamy NORMAL.
+         */
+        if (speed_kmh <= OPEN_OFF_SPEED_KMH)
+        {
+            wing_state =
+                WING_NORMAL;
+
+            open_confirm_active = 0U;
+        }
+        else
+        {
+            /*
+             * COASTING / lekkie zwalnianie
+             * pozostawia nas w OPEN.
+             *
+             * Mocne hamowanie zostalo
+             * przechwycone wyzej.
+             */
+            wing_state =
+                WING_OPEN;
+        }
+    }
+
+
+    /*
+     * Jestesmy NORMAL.
+     */
+    else
+    {
+        if (speed_kmh <= OPEN_OFF_SPEED_KMH)
+        {
+            wing_state =
+                WING_NORMAL;
+
+            open_confirm_active = 0U;
         }
 
 
-        else if (
-            speed_kmh >=
-            OPEN_ON_SPEED_KMH
-        )
+        /*
+         * OPEN mozemy wlaczyc dopiero
+         * powyzej gornego progu.
+         */
+        else if (speed_kmh >= OPEN_ON_SPEED_KMH)
         {
             if (open_allowed_by_decel)
             {
-                if (open_stable_samples <
-                    OPEN_STABLE_SAMPLES)
+                /*
+                 * Pierwsza poprawna probka
+                 * rozpoczyna odliczanie.
+                 */
+                if (open_confirm_active == 0U)
                 {
-                    open_stable_samples++;
+                    open_confirm_active = 1U;
+                    open_confirm_start_tick = now;
+                }
+
+
+                /*
+                 * Warunek musi pozostac
+                 * spelniony przez 300 ms.
+                 */
+                if ((uint32_t)(
+                        now -
+                        open_confirm_start_tick
+                    ) >= OPEN_CONFIRM_MS)
+                {
+                    wing_state =
+                        WING_OPEN;
+
+                    open_confirm_active = 0U;
+                }
+                else
+                {
+                    wing_state =
+                        WING_NORMAL;
                 }
             }
             else
             {
-                open_stable_samples = 0;
+                /*
+                 * Trend przestal pozwalac
+                 * na OPEN.
+                 *
+                 * Potwierdzanie zacznie sie
+                 * od nowa.
+                 */
+                open_confirm_active = 0U;
 
-
-                wing_state =
-                    WING_NORMAL;
-            }
-
-
-            if (open_stable_samples >=
-                OPEN_STABLE_SAMPLES)
-            {
-                wing_state =
-                    WING_OPEN;
-            }
-            else
-            {
                 wing_state =
                     WING_NORMAL;
             }
         }
 
 
+        /*
+         * Strefa histerezy predkosci
+         * 45...55 km/h.
+         *
+         * Skoro aktualnie nie jestesmy OPEN,
+         * pozostajemy NORMAL.
+         */
         else
         {
-            if (wing_state ==
-                    WING_OPEN &&
+            wing_state =
+                WING_NORMAL;
 
-                open_allowed_by_decel)
-            {
-                wing_state =
-                    WING_OPEN;
-            }
-            else
-            {
-                wing_state =
-                    WING_NORMAL;
-
-
-                open_stable_samples = 0;
-            }
+            open_confirm_active = 0U;
         }
     }
-
 
 
     Servo_UpdateWingStateIfChanged(
@@ -389,12 +660,19 @@ void Control_Update_From_Speed(
     );
 
 
-
+    /*
+     * ==========================================
+     * LOG
+     * ==========================================
+     */
     printf(
-        "SPEED=%u km/h | dt=%lu ms | dV=%d km/h | rate=",
+        "SPEED=%u km/h"
+        " | filter=%lu ms n=%u"
+        " | rateFilt=",
+
         (unsigned int)speed_kmh,
-        (unsigned long)dt_ms,
-        (int)delta_speed
+        (unsigned long)filter_span_ms,
+        (unsigned int)filter_samples
     );
 
 
@@ -404,7 +682,7 @@ void Control_Update_From_Speed(
 
 
     printf(
-        " km/h/s | a="
+        " km/h/s | aFilt="
     );
 
 
@@ -413,44 +691,40 @@ void Control_Update_From_Speed(
     );
 
 
-    printf(" g");
-
-
-    IMU_PrintCornerInline();
-
-
     printf(
-        " | openCnt=%u postBrake=%u | Acceleration=%u Coasting=%u Breaking=%u | WING=%s\r\n",
+        " g"
+        " | corner=%u"
+        " | brake=%u"
+        " | openConfirm=%u"
+        " | postBrake=%u"
+        " | Acceleration=%u"
+        " Coasting=%u"
+        " Breaking=%u"
+        " | WING=%s\r\n",
 
         (unsigned int)
-            open_stable_samples,
+            IMU_IsCornerDetected(),
 
         (unsigned int)
-            post_brake_normal_samples,
+            brake_detected,
+
+        (unsigned int)
+            open_confirm_active,
+
+        (unsigned int)
+            post_brake_hold_active,
 
         (motion_state ==
-            MOTION_ACCELERATION)
-            ? 1U : 0U,
+            MOTION_ACCELERATION) ? 1U : 0U,
 
         (motion_state ==
-            MOTION_COASTING)
-            ? 1U : 0U,
+            MOTION_COASTING) ? 1U : 0U,
 
         (motion_state ==
-            MOTION_BREAKING)
-            ? 1U : 0U,
+            MOTION_BREAKING) ? 1U : 0U,
 
         WingState_ToString(
             wing_state
         )
     );
-
-
-
-    prev_speed_kmh =
-        speed_kmh;
-
-
-    prev_speed_tick =
-        now;
 }
