@@ -12,7 +12,7 @@
 #include "debug_utils.h"
 
 #include <stdio.h>
-
+#include "motion_fx_app.h"
 
 extern I2C_HandleTypeDef hi2c1;
 
@@ -38,12 +38,13 @@ extern I2C_HandleTypeDef hi2c1;
 #define LSM6DSO_STATUS_REG         0x1E
 #define LSM6DSO_STATUS_XLDA        0x01U
 
-
+#define LSM6DSO_OUTX_L_G       0x22U
+#define LSM6DSO_STATUS_GDA     0x02U
 
 static uint16_t lsm6dso_addr =
     LSM6DSO_ADDR_HIGH;
 
-static uint8_t imu_dma_buffer[6];
+static uint8_t imu_dma_buffer[12];
 
 static volatile uint8_t imu_dma_busy = 0U;
 static volatile uint8_t imu_sample_ready = 0U;
@@ -54,6 +55,20 @@ static uint8_t imu_status_reg = 0U;
 
 static volatile uint8_t imu_read_due = 0U;
 static volatile uint8_t imu_accel_read_due = 0U;
+
+static int32_t imu_gx_mdps = 0;
+static int32_t imu_gy_mdps = 0;
+static int32_t imu_gz_mdps = 0;
+
+static volatile uint32_t imu_sample_tick_ms = 0U;
+
+static uint8_t imu_gyro_ready_for_sample = 0U;
+
+
+static uint32_t imu_last_processed_tick = 0U;
+static uint8_t imu_has_sample = 0U;
+static volatile uint32_t imu_i2c_error_count = 0U;
+static uint32_t imu_dma_start_error_count = 0U;
 
 typedef enum
 {
@@ -140,14 +155,15 @@ static uint8_t LSM6DSO_StartAccelRead_DMA(void)
     if (HAL_I2C_Mem_Read_DMA(
             &hi2c1,
             lsm6dso_addr,
-            LSM6DSO_OUTX_L_A,
+            LSM6DSO_OUTX_L_G,
             I2C_MEMADD_SIZE_8BIT,
             imu_dma_buffer,
-            6U) != HAL_OK)
+            12U
+        ) != HAL_OK)
     {
         imu_dma_busy = 0U;
         imu_dma_transfer = IMU_DMA_NONE;
-
+        imu_dma_start_error_count++;
         return 0U;
     }
 
@@ -184,6 +200,7 @@ static uint8_t LSM6DSO_StartStatusRead_DMA(void)
     {
         imu_dma_busy = 0U;
         imu_dma_transfer = IMU_DMA_NONE;
+        imu_dma_start_error_count++;
 
         return 0U;
     }
@@ -272,11 +289,14 @@ uint8_t LSM6DSO_Init(void)
         );
     }
 
-
-    LSM6DSO_WriteReg(
-        LSM6DSO_CTRL2_G,
-        0x00
-    );
+    if (LSM6DSO_WriteReg(
+            LSM6DSO_CTRL2_G,
+            0x40
+        ) != HAL_OK)
+    {
+        printf("LSM6DSO gyro configuration error\r\n");
+        return 0U;
+    }
 
 
     if (LSM6DSO_WriteReg(
@@ -394,9 +414,9 @@ static void LSM6DSO_PrintAccelInline(void)
 
 
 
-/* =========================
+/*
  * DETEKCJA ZAKRĘTU
- * =========================
+
  */
 
 typedef enum
@@ -487,24 +507,36 @@ static int32_t IMU_SelectAxis_mG(
 static void IMU_UpdateCornerDetection(void)
 {
 
-	int16_t raw_x =
-	    (int16_t)(
-	        ((uint16_t)imu_dma_buffer[1] << 8) |
-	        imu_dma_buffer[0]
-	    );
+	/* Zyroskop */
+	int16_t raw_gx =
+	    (int16_t)(((uint16_t)imu_dma_buffer[1] << 8) |
+	              imu_dma_buffer[0]);
+
+	int16_t raw_gy =
+	    (int16_t)(((uint16_t)imu_dma_buffer[3] << 8) |
+	              imu_dma_buffer[2]);
+
+	int16_t raw_gz =
+	    (int16_t)(((uint16_t)imu_dma_buffer[5] << 8) |
+	              imu_dma_buffer[4]);
+
+	/* Akcelerometr */
+	int16_t raw_x = (int16_t)(((uint16_t)imu_dma_buffer[7] << 8) |
+	              imu_dma_buffer[6]);
 
 	int16_t raw_y =
-	    (int16_t)(
-	        ((uint16_t)imu_dma_buffer[3] << 8) |
-	        imu_dma_buffer[2]
-	    );
+	    (int16_t)(((uint16_t)imu_dma_buffer[9] << 8) |
+	              imu_dma_buffer[8]);
 
 	int16_t raw_z =
-	    (int16_t)(
-	        ((uint16_t)imu_dma_buffer[5] << 8) |
-	        imu_dma_buffer[4]
-	    );
+	    (int16_t)(((uint16_t)imu_dma_buffer[11] << 8) |
+	              imu_dma_buffer[10]);
 
+
+	/* Zakres gyro +-250 dps: 8.75 mdps/LSB */
+	imu_gx_mdps = ((int32_t)raw_gx * 875L) / 100L;
+	imu_gy_mdps = ((int32_t)raw_gy * 875L) / 100L;
+	imu_gz_mdps = ((int32_t)raw_gz * 875L) / 100L;
 
 	int32_t ax =
 	    LSM6DSO_AccelRaw_To_mG(raw_x);
@@ -578,10 +610,6 @@ static void IMU_UpdateCornerDetection(void)
             corner_off_counter = 0;
 
 
-            /*
-             * main() po IMU_Task()
-             * natychmiast obsłuży to zdarzenie.
-             */
             corner_detected_event = 1;
 
 
@@ -653,6 +681,9 @@ void HAL_I2C_MemRxCpltCallback(
     if (imu_dma_transfer == IMU_DMA_STATUS)
     {
         imu_dma_transfer = IMU_DMA_NONE;
+        imu_gyro_ready_for_sample =
+            ((imu_status_reg & LSM6DSO_STATUS_GDA) != 0U)
+            ? 1U : 0U;
 
         /*
          * XLDA = 1:
@@ -671,6 +702,7 @@ void HAL_I2C_MemRxCpltCallback(
 
 
         imu_sample_ready = 1U;
+        imu_sample_tick_ms = HAL_GetTick();
     }
 }
 
@@ -680,6 +712,7 @@ void HAL_I2C_ErrorCallback(
 {
     if (hi2c->Instance == I2C1)
     {
+        imu_i2c_error_count++;
         imu_dma_busy = 0U;
         imu_dma_transfer = IMU_DMA_NONE;
 
@@ -691,12 +724,31 @@ void HAL_I2C_ErrorCallback(
 void IMU_Task(void)
 {
 
-    if (imu_sample_ready != 0U)
-    {
-        imu_sample_ready = 0U;
+	if (imu_sample_ready != 0U)
+	{
+	    imu_sample_ready = 0U;
 
-        IMU_UpdateCornerDetection();
-    }
+	    IMU_UpdateCornerDetection();
+
+	    imu_last_processed_tick = imu_sample_tick_ms;
+	    imu_has_sample = 1U;
+
+
+	    if (imu_gyro_ready_for_sample != 0U)
+	    {
+	        MotionFxApp_Process(
+	            (float)imu_ax_mg / 1000.0f,
+	            (float)imu_ay_mg / 1000.0f,
+	            (float)imu_az_mg / 1000.0f,
+
+	            (float)imu_gx_mdps / 1000.0f,
+	            (float)imu_gy_mdps / 1000.0f,
+	            (float)imu_gz_mdps / 1000.0f,
+
+	            imu_sample_tick_ms
+	        );
+	    }
+	}
 
 
 
@@ -781,4 +833,48 @@ uint8_t IMU_TakeCornerDetectedEvent(void)
 
 
     return event;
+}
+
+
+
+void IMU_GetDiagSnapshot(IMU_Diag_t *out)
+{
+    if (out == NULL) return;
+    out->valid = imu_has_sample;
+    out->age_ms = imu_has_sample ?
+        (HAL_GetTick() - imu_last_processed_tick) : 0xFFFFFFFFU;
+    out->ax_mg = imu_ax_mg;
+    out->ay_mg = imu_ay_mg;
+    out->az_mg = imu_az_mg;
+    out->gx_mdps = imu_gx_mdps;
+    out->gy_mdps = imu_gy_mdps;
+    out->gz_mdps = imu_gz_mdps;
+    out->lateral_raw_mg = imu_lateral_raw_mg;
+    out->lateral_filtered_mg = imu_lateral_filtered_mg;
+    out->corner = corner_detected;
+    out->corner_on_count = corner_on_counter;
+    out->corner_off_count = corner_off_counter;
+    out->i2c_error_count = imu_i2c_error_count;
+    out->dma_start_error_count = imu_dma_start_error_count;
+}
+
+uint8_t IMU_GetAccelSnapshot(
+    int32_t *ax_mg,
+    int32_t *ay_mg,
+    int32_t *az_mg,
+    uint32_t *age_ms
+)
+{
+    if (imu_has_sample == 0U)
+    {
+        return 0U;
+    }
+
+    *ax_mg = imu_ax_mg;
+    *ay_mg = imu_ay_mg;
+    *az_mg = imu_az_mg;
+
+    *age_ms = HAL_GetTick() - imu_last_processed_tick;
+
+    return 1U;
 }

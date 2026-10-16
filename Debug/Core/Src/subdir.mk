@@ -6,8 +6,10 @@
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
 ../Core/Src/debug_utils.c \
+../Core/Src/diag_log.c \
 ../Core/Src/imu.c \
 ../Core/Src/main.c \
+../Core/Src/motion_fx_app.c \
 ../Core/Src/obd.c \
 ../Core/Src/servo.c \
 ../Core/Src/stm32g4xx_hal_msp.c \
@@ -19,8 +21,10 @@ C_SRCS += \
 
 OBJS += \
 ./Core/Src/debug_utils.o \
+./Core/Src/diag_log.o \
 ./Core/Src/imu.o \
 ./Core/Src/main.o \
+./Core/Src/motion_fx_app.o \
 ./Core/Src/obd.o \
 ./Core/Src/servo.o \
 ./Core/Src/stm32g4xx_hal_msp.o \
@@ -32,8 +36,10 @@ OBJS += \
 
 C_DEPS += \
 ./Core/Src/debug_utils.d \
+./Core/Src/diag_log.d \
 ./Core/Src/imu.d \
 ./Core/Src/main.d \
+./Core/Src/motion_fx_app.d \
 ./Core/Src/obd.d \
 ./Core/Src/servo.d \
 ./Core/Src/stm32g4xx_hal_msp.d \
@@ -46,12 +52,12 @@ C_DEPS += \
 
 # Each subdirectory must supply rules for building sources it contributes
 Core/Src/%.o Core/Src/%.su Core/Src/%.cyclo: ../Core/Src/%.c Core/Src/subdir.mk
-	arm-none-eabi-gcc "$<" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_NUCLEO_64 -DUSE_HAL_DRIVER -DSTM32G474xx -c -I../Core/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/BSP/STM32G4xx_Nucleo -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "$@"
+	arm-none-eabi-gcc "$<" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DUSE_NUCLEO_64 -DUSE_HAL_DRIVER -DSTM32G474xx -c -I../Core/Inc -I"C:/Users/karab/STM32CubeIDE/workspace_2.2.0/board_test_2/MotionFX/Inc" -I../Drivers/STM32G4xx_HAL_Driver/Inc -I../Drivers/STM32G4xx_HAL_Driver/Inc/Legacy -I../Drivers/BSP/STM32G4xx_Nucleo -I../Drivers/CMSIS/Device/ST/STM32G4xx/Include -I../Drivers/CMSIS/Include -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -o "$@"
 
 clean: clean-Core-2f-Src
 
 clean-Core-2f-Src:
-	-$(RM) ./Core/Src/debug_utils.cyclo ./Core/Src/debug_utils.d ./Core/Src/debug_utils.o ./Core/Src/debug_utils.su ./Core/Src/imu.cyclo ./Core/Src/imu.d ./Core/Src/imu.o ./Core/Src/imu.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/obd.cyclo ./Core/Src/obd.d ./Core/Src/obd.o ./Core/Src/obd.su ./Core/Src/servo.cyclo ./Core/Src/servo.d ./Core/Src/servo.o ./Core/Src/servo.su ./Core/Src/stm32g4xx_hal_msp.cyclo ./Core/Src/stm32g4xx_hal_msp.d ./Core/Src/stm32g4xx_hal_msp.o ./Core/Src/stm32g4xx_hal_msp.su ./Core/Src/stm32g4xx_it.cyclo ./Core/Src/stm32g4xx_it.d ./Core/Src/stm32g4xx_it.o ./Core/Src/stm32g4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32g4xx.cyclo ./Core/Src/system_stm32g4xx.d ./Core/Src/system_stm32g4xx.o ./Core/Src/system_stm32g4xx.su ./Core/Src/wing_control.cyclo ./Core/Src/wing_control.d ./Core/Src/wing_control.o ./Core/Src/wing_control.su
+	-$(RM) ./Core/Src/debug_utils.cyclo ./Core/Src/debug_utils.d ./Core/Src/debug_utils.o ./Core/Src/debug_utils.su ./Core/Src/diag_log.cyclo ./Core/Src/diag_log.d ./Core/Src/diag_log.o ./Core/Src/diag_log.su ./Core/Src/imu.cyclo ./Core/Src/imu.d ./Core/Src/imu.o ./Core/Src/imu.su ./Core/Src/main.cyclo ./Core/Src/main.d ./Core/Src/main.o ./Core/Src/main.su ./Core/Src/motion_fx_app.cyclo ./Core/Src/motion_fx_app.d ./Core/Src/motion_fx_app.o ./Core/Src/motion_fx_app.su ./Core/Src/obd.cyclo ./Core/Src/obd.d ./Core/Src/obd.o ./Core/Src/obd.su ./Core/Src/servo.cyclo ./Core/Src/servo.d ./Core/Src/servo.o ./Core/Src/servo.su ./Core/Src/stm32g4xx_hal_msp.cyclo ./Core/Src/stm32g4xx_hal_msp.d ./Core/Src/stm32g4xx_hal_msp.o ./Core/Src/stm32g4xx_hal_msp.su ./Core/Src/stm32g4xx_it.cyclo ./Core/Src/stm32g4xx_it.d ./Core/Src/stm32g4xx_it.o ./Core/Src/stm32g4xx_it.su ./Core/Src/syscalls.cyclo ./Core/Src/syscalls.d ./Core/Src/syscalls.o ./Core/Src/syscalls.su ./Core/Src/sysmem.cyclo ./Core/Src/sysmem.d ./Core/Src/sysmem.o ./Core/Src/sysmem.su ./Core/Src/system_stm32g4xx.cyclo ./Core/Src/system_stm32g4xx.d ./Core/Src/system_stm32g4xx.o ./Core/Src/system_stm32g4xx.su ./Core/Src/wing_control.cyclo ./Core/Src/wing_control.d ./Core/Src/wing_control.o ./Core/Src/wing_control.su
 
 .PHONY: clean-Core-2f-Src
 

@@ -1,0 +1,4 @@
+../Core/Src/motion_fx_app.c:35:9:MotionFxApp_Init	64	static
+../Core/Src/motion_fx_app.c:84:6:MotionFxApp_Process	64	static
+../Core/Src/motion_fx_app.c:171:9:MotionFxApp_GetLatest	24	static
+../Core/Src/motion_fx_app.c:190:6:MotionFxApp_PrintDebug	128	static

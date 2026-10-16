@@ -62,7 +62,7 @@ main-build: board_test_2.elf secondary-outputs
 
 # Tool invocations
 board_test_2.elf board_test_2.map: $(OBJS) $(USER_OBJS) C:\Users\karab\STM32CubeIDE\workspace_2.2.0\board_test_2\STM32G474RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "board_test_2.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\karab\STM32CubeIDE\workspace_2.2.0\board_test_2\STM32G474RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="board_test_2.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+	arm-none-eabi-gcc -o "board_test_2.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\karab\STM32CubeIDE\workspace_2.2.0\board_test_2\STM32G474RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="board_test_2.map" -Wl,--gc-sections -static -L"C:\Users\karab\STM32CubeIDE\workspace_2.2.0\board_test_2\MotionFX\Lib" --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
