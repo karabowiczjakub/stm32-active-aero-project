@@ -28,6 +28,8 @@
 #include "imu.h"
 #include "wing_control.h"
 #include "obd.h"
+#include "motion_fx_app.h"
+#include "diag_log.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -126,7 +128,8 @@ int main(void)
   BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
 
   /* Initialize COM1 port (115200, 8 bits (7-bit data + 1 stop bit), no parity */
-  BspCOMInit.BaudRate   = 115200;
+
+  BspCOMInit.BaudRate   = 460800;
   BspCOMInit.WordLength = COM_WORDLENGTH_8B;
   BspCOMInit.StopBits   = COM_STOPBITS_1;
   BspCOMInit.Parity     = COM_PARITY_NONE;
@@ -180,6 +183,14 @@ int main(void)
   {
     printf("IMU init FAILED\r\n");
   }
+
+  if (imu_ok)
+  {
+      if (MotionFxApp_Init() != 0U)
+      {
+          printf("MotionFX diagnostic ready\r\n");
+      }
+  }
   /* USER CODE END BSP */
 
   /* Infinite loop */
@@ -188,6 +199,13 @@ int main(void)
   {
 
       IMU_Task();
+
+
+
+
+
+
+
 
       if (IMU_TakeCornerDetectedEvent())
       {
@@ -214,7 +232,7 @@ int main(void)
           }
       }
 
-
+      DiagLog_Task();
 
 /*
 	    Servo_SetWingState(WING_NORMAL);
@@ -492,7 +510,7 @@ static void MX_TIM7_Init(void)
   htim7.Instance = TIM7;
   htim7.Init.Prescaler = 16999;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 65535;
+  htim7.Init.Period = 199;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {

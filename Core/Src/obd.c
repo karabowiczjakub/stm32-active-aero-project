@@ -38,6 +38,14 @@ static volatile uint32_t can_rx_overflow_count = 0U;
 static volatile uint8_t obd_request_pending = 0U;
 static uint32_t obd_request_sent_tick = 0U;
 
+static uint8_t obd_last_speed_kmh = 0U;
+static uint32_t obd_last_speed_tick = 0U;
+static uint8_t obd_speed_received = 0U;
+static uint32_t obd_speed_rx_count = 0U;
+static uint32_t obd_request_queued_count = 0U;
+static uint32_t obd_tx_error_count = 0U;
+static uint32_t obd_response_timeout_count = 0U;
+
 static uint8_t FDCAN_DLC_ToBytes(
     uint32_t dlc
 )
@@ -497,6 +505,7 @@ void CAN_Send_OBD_Request(
             txData
         ) != HAL_OK)
     {
+        obd_tx_error_count++;
         printf(
             "OBD request TX error, PID=0x%02X\r\n",
             pid
@@ -506,8 +515,9 @@ void CAN_Send_OBD_Request(
     {
     	obd_request_pending = 1U;
     	    obd_request_sent_tick = HAL_GetTick();
+            obd_request_queued_count++;
 
-    	    printf("REQ PID=0x%02X\r\n", pid);
+
     }
 }
 
@@ -631,10 +641,6 @@ void HAL_FDCAN_RxFifo0Callback(
         );
 
 
-    /*
-     * Jesli next_head == tail,
-     * kolejka jest pelna.
-     */
     if (next_head == can_rx_tail)
     {
         can_rx_overflow_count++;
@@ -653,10 +659,7 @@ void HAL_FDCAN_RxFifo0Callback(
     }
 
 
-    /*
-     * head zmieniamy dopiero po
-     * skopiowaniu calej ramki.
-     */
+
     can_rx_head = next_head;
 }
 
@@ -690,6 +693,11 @@ static void CAN_ProcessFrame(
     }
 
 
+    if (FDCAN_DLC_ToBytes(rx_header->DataLength) < 4U)
+    {
+        return;
+    }
+
     if (rx_data[1] != 0x41U)
     {
         return;
@@ -703,11 +711,14 @@ static void CAN_ProcessFrame(
 
     uint8_t speed_kmh = rx_data[3];
 
+    obd_last_speed_kmh = speed_kmh;
+    obd_last_speed_tick = HAL_GetTick();
+    obd_speed_received = 1U;
+    obd_speed_rx_count++;
+
     obd_request_pending = 0U;
 
-    Control_Update_From_Speed(
-        speed_kmh
-    );
+    Control_Update_From_Speed(speed_kmh);
 }
 
 
@@ -750,8 +761,44 @@ void CAN_Check_OBD_RequestTimeout(void)
     if ((HAL_GetTick() - obd_request_sent_tick) >=
         OBD_RESPONSE_TIMEOUT_MS)
     {
+        obd_response_timeout_count++;
         obd_request_pending = 0U;
     }
+}
+
+
+void OBD_GetDiagSnapshot(OBD_Diag_t *out)
+{
+    if (out == NULL) return;
+    uint32_t now = HAL_GetTick();
+    out->speed_valid = obd_speed_received;
+    out->speed_kmh = obd_last_speed_kmh;
+    out->speed_age_ms = obd_speed_received ?
+        now - obd_last_speed_tick : 0xFFFFFFFFU;
+    out->request_pending = obd_request_pending;
+    out->request_age_ms = obd_request_pending ?
+        now - obd_request_sent_tick : 0U;
+    out->speed_rx_count = obd_speed_rx_count;
+    out->request_queued_count = obd_request_queued_count;
+    out->tx_error_count = obd_tx_error_count;
+    out->response_timeout_count = obd_response_timeout_count;
+    out->rx_overflow_count = can_rx_overflow_count;
+}
+
+uint8_t OBD_GetSpeedSnapshot(
+    uint8_t *speed_kmh,
+    uint32_t *age_ms
+)
+{
+    if (obd_speed_received == 0U)
+    {
+        return 0U;
+    }
+
+    *speed_kmh = obd_last_speed_kmh;
+    *age_ms = HAL_GetTick() - obd_last_speed_tick;
+
+    return 1U;
 }
 
 

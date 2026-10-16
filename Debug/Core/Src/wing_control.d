@@ -1,5 +1,5 @@
 Core/Src/wing_control.o: ../Core/Src/wing_control.c \
- ../Core/Inc/wing_control.h ../Core/Inc/main.h \
+ ../Core/Inc/wing_control.h ../Core/Inc/app_types.h ../Core/Inc/main.h \
  ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal.h \
  ../Core/Inc/stm32g4xx_hal_conf.h \
  ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal_rcc.h \
@@ -35,9 +35,9 @@ Core/Src/wing_control.o: ../Core/Src/wing_control.c \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo.h \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h \
  ../Core/Inc/stm32g4xx_nucleo_conf.h ../Core/Inc/app_types.h \
- ../Core/Inc/servo.h ../Core/Inc/app_types.h ../Core/Inc/imu.h \
- ../Core/Inc/debug_utils.h
+ ../Core/Inc/servo.h ../Core/Inc/imu.h ../Core/Inc/debug_utils.h
 ../Core/Inc/wing_control.h:
+../Core/Inc/app_types.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal.h:
 ../Core/Inc/stm32g4xx_hal_conf.h:
@@ -76,6 +76,5 @@ Core/Src/wing_control.o: ../Core/Src/wing_control.c \
 ../Core/Inc/stm32g4xx_nucleo_conf.h:
 ../Core/Inc/app_types.h:
 ../Core/Inc/servo.h:
-../Core/Inc/app_types.h:
 ../Core/Inc/imu.h:
 ../Core/Inc/debug_utils.h:

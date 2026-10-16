@@ -72,6 +72,14 @@ static uint8_t open_confirm_active = 0U;
 static uint32_t open_confirm_start_tick = 0U;
 
 
+static uint8_t diag_rate_valid = 0U;
+static int32_t diag_rate_x10 = 0;
+static int32_t diag_accel_mg = 0;
+static uint32_t diag_filter_span_ms = 0U;
+static uint8_t diag_filter_samples = 0U;
+static uint8_t diag_brake_detected = 0U;
+
+
 typedef struct
 {
     uint8_t speed_kmh;
@@ -130,10 +138,7 @@ static uint8_t SpeedHistory_CalculateRateX10(
     uint32_t newest_tick =
         speed_history[newest_index].tick_ms;
 
-    /*
-     * Szukamy najstarszej probki,
-     * ktora nadal miesci sie w oknie ~300 ms.
-     */
+
     uint8_t first_pos = 0xFFU;
 
     for (uint8_t pos = 0U;
@@ -188,7 +193,7 @@ static uint8_t SpeedHistory_CalculateRateX10(
     }
 
     /*
-     * Regresja liniowa:
+     * Regresja liniowa w postaci
      *
      * v(t) = a*t + b
      *
@@ -251,14 +256,7 @@ static uint8_t SpeedHistory_CalculateRateX10(
         return 0U;
     }
 
-    /*
-     * Nachylenie regresji jest w km/h/ms.
-     *
-     * Mnozenie przez 10000 daje:
-     * 0.1 km/h/s
-     *
-     * np. -55 = -5.5 km/h/s.
-     */
+
     *rate_x10 =
         (int32_t)(
             (numerator * 10000LL) /
@@ -283,6 +281,28 @@ static int32_t RateX10_To_mG(
 
 
 
+
+void Control_GetDiagSnapshot(Control_Diag_t *out)
+{
+    if (out == NULL) return;
+    uint32_t now = HAL_GetTick();
+    out->wing_state = wing_state;
+    out->motion_state = (uint8_t)motion_state;
+    out->brake_detected = diag_brake_detected;
+    out->rate_valid = diag_rate_valid;
+    out->rate_x10 = diag_rate_x10;
+    out->accel_mg = diag_accel_mg;
+    out->filter_span_ms = diag_filter_span_ms;
+    out->filter_samples = diag_filter_samples;
+    out->open_confirm_active = open_confirm_active;
+    out->open_remaining_ms = open_confirm_active ?
+        ((now - open_confirm_start_tick) >= OPEN_CONFIRM_MS ? 0U :
+         OPEN_CONFIRM_MS - (now - open_confirm_start_tick)) : 0U;
+    out->post_brake_hold_active = post_brake_hold_active;
+    out->post_remaining_ms = post_brake_hold_active ?
+        ((now - post_brake_start_tick) >= POST_BRAKE_NORMAL_MS ? 0U :
+         POST_BRAKE_NORMAL_MS - (now - post_brake_start_tick)) : 0U;
+}
 
 void Control_ForceNormalForCorner(void)
 {
@@ -310,10 +330,7 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
 {
     uint32_t now = HAL_GetTick();
 
-    /*
-     * Kazda odebrana probka trafia
-     * do przesuwnego bufora.
-     */
+
     SpeedHistory_Add(
         speed_kmh,
         now
@@ -325,16 +342,21 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     uint8_t filter_samples = 0U;
 
 
-    /*
-     * Filtrowany trend predkosci
-     * z wszystkich probek z ~300 ms.
-     */
+
     uint8_t rate_valid =
         SpeedHistory_CalculateRateX10(
             &rate_x10,
             &filter_span_ms,
             &filter_samples
         );
+
+
+    diag_rate_valid = rate_valid;
+    diag_rate_x10 = rate_x10;
+    diag_accel_mg = rate_valid ? RateX10_To_mG(rate_x10) : 0;
+    diag_filter_span_ms = filter_span_ms;
+    diag_filter_samples = filter_samples;
+    diag_brake_detected = 0U;
 
 
     /*
@@ -359,20 +381,14 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     }
 
 
-    /*
-     * Jeszcze nie mamy wystarczajacej
-     * historii do wyznaczenia rate.
-     *
-     * Nie zmieniamy stanu skrzydla.
-     */
+
     if (rate_valid == 0U)
     {
         return;
     }
 
 
-    int32_t accel_mg =
-        RateX10_To_mG(rate_x10);
+
 
 
     uint8_t brake_detected = 0U;
@@ -417,18 +433,16 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     /*
      * Warunek tylko do WEJSCIA
      * NORMAL -> OPEN.
-     *
-     * Nie wyrzuca z istniejacego OPEN.
      */
+    diag_brake_detected = brake_detected;
+
     if (rate_x10 >= -OPEN_DECEL_BLOCK_X10)
     {
         open_allowed_by_decel = 1U;
     }
 
 
-    /*
-     * Stan ruchu.
-     */
+
     if (rate_x10 >= ACCEL_THRESHOLD_X10)
     {
         motion_state =
@@ -450,24 +464,6 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
      * ==========================================
      * MASZYNA STANOW
      * ==========================================
-     *
-     * CORNER:
-     *     -> NORMAL
-     *
-     * mocne hamowanie:
-     *     -> AIR_BRAKE
-     *
-     * koniec AIR_BRAKE:
-     *     -> NORMAL
-     *
-     * OPEN:
-     *     lekkie zwalnianie / coasting
-     *     nie powoduje wyjscia z OPEN
-     */
-
-
-    /*
-     * Mocne hamowanie.
      */
     if (brake_detected)
     {
@@ -638,13 +634,7 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
         }
 
 
-        /*
-         * Strefa histerezy predkosci
-         * 45...55 km/h.
-         *
-         * Skoro aktualnie nie jestesmy OPEN,
-         * pozostajemy NORMAL.
-         */
+
         else
         {
             wing_state =
@@ -660,11 +650,7 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     );
 
 
-    /*
-     * ==========================================
-     * LOG
-     * ==========================================
-     */
+#if 0
     printf(
         "SPEED=%u km/h"
         " | filter=%lu ms n=%u"
@@ -691,9 +677,12 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     );
 
 
+    printf(" g");
+
+    /* Wypisuje corner, lateral, ax, ay, az */
+    IMU_PrintCornerInline();
+
     printf(
-        " g"
-        " | corner=%u"
         " | brake=%u"
         " | openConfirm=%u"
         " | postBrake=%u"
@@ -702,29 +691,18 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
         " Breaking=%u"
         " | WING=%s\r\n",
 
-        (unsigned int)
-            IMU_IsCornerDetected(),
+        (unsigned int)brake_detected,
+        (unsigned int)open_confirm_active,
+        (unsigned int)post_brake_hold_active,
 
-        (unsigned int)
-            brake_detected,
+        (motion_state == MOTION_ACCELERATION) ? 1U : 0U,
+        (motion_state == MOTION_COASTING) ? 1U : 0U,
+        (motion_state == MOTION_BREAKING) ? 1U : 0U,
 
-        (unsigned int)
-            open_confirm_active,
-
-        (unsigned int)
-            post_brake_hold_active,
-
-        (motion_state ==
-            MOTION_ACCELERATION) ? 1U : 0U,
-
-        (motion_state ==
-            MOTION_COASTING) ? 1U : 0U,
-
-        (motion_state ==
-            MOTION_BREAKING) ? 1U : 0U,
-
-        WingState_ToString(
-            wing_state
-        )
+        WingState_ToString(wing_state)
     );
+#endif
 }
+
+
+

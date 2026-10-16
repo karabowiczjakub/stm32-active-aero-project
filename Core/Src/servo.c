@@ -14,9 +14,7 @@
 #include <stdio.h>
 
 
-/*
- * Uchwyt timera jest tworzony przez kod CubeMX w main.c.
- */
+
 extern TIM_HandleTypeDef htim2;
 /*
  * Znaczenie aerodynamiczne:
@@ -24,9 +22,7 @@ extern TIM_HandleTypeDef htim2;
  * OPEN       = maly kat / okolo 0 stopni / redukcja oporu
  * NORMAL     = lekki kat natarcia / generowanie docisku
  * AIR_BRAKE  = najwiekszy kat / maksymalny opor
- *
- * Uwaga: to sa wartosci robocze. Po montazu mechaniki dobierzemy je dokladnie.
- */
+
 
 /* Zakres impulsu serwa */
 #define SERVO_MIN_PULSE_US          1000U
@@ -109,9 +105,7 @@ void Servo_Init(void)
         Error_Handler();
     }
 
-    /*
-     * Bezpieczna pozycja początkowa.
-     */
+
     Servo_SetWingState(WING_NORMAL);
 }
 

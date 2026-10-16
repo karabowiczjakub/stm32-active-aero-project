@@ -33,7 +33,8 @@ Core/Src/obd.o: ../Core/Src/obd.c ../Core/Inc/obd.h ../Core/Inc/main.h \
  ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal_uart_ex.h \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo.h \
  ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h \
- ../Core/Inc/stm32g4xx_nucleo_conf.h ../Core/Inc/wing_control.h
+ ../Core/Inc/stm32g4xx_nucleo_conf.h ../Core/Inc/wing_control.h \
+ ../Core/Inc/app_types.h
 ../Core/Inc/obd.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal.h:
@@ -72,3 +73,4 @@ Core/Src/obd.o: ../Core/Src/obd.c ../Core/Inc/obd.h ../Core/Inc/main.h \
 ../Drivers/BSP/STM32G4xx_Nucleo/stm32g4xx_nucleo_errno.h:
 ../Core/Inc/stm32g4xx_nucleo_conf.h:
 ../Core/Inc/wing_control.h:
+../Core/Inc/app_types.h:
