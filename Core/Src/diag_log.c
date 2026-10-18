@@ -18,6 +18,40 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "app_config.h"
+
+#if APP_LAP_SIM_ENABLED
+#include "lap_sim.h"
+
+void DiagLog_Task(void)
+{
+    static uint32_t last_sim_log_ms;
+    static LapSim_State_t last_sim_state = LAP_SIM_WAITING;
+    static WingState_t last_sim_wing = WING_NORMAL;
+    LapSim_Diag_t sim;
+    Control_Diag_t ctrl;
+    LapSim_GetDiagSnapshot(&sim);
+    if (sim.state == LAP_SIM_WAITING) return;
+    Control_GetDiagSnapshot(&ctrl);
+    uint8_t changed = sim.state != last_sim_state || ctrl.wing_state != last_sim_wing;
+    if (!changed && (sim.state == LAP_SIM_FINISHED ||
+                     sim.elapsed_ms - last_sim_log_ms < 100U)) return;
+    last_sim_log_ms = sim.elapsed_ms;
+    last_sim_state = sim.state;
+    last_sim_wing = ctrl.wing_state;
+
+    printf("SIM,%lu,%u,", (unsigned long)sim.elapsed_ms, (unsigned)sim.speed_kmh);
+    Print_Signed_mG_As_G(sim.lateral_mg);
+    printf(",");
+    Print_Signed_mG_As_G(sim.longitudinal_mg);
+    printf(",");
+    if (ctrl.rate_valid) Print_Signed_X10(ctrl.rate_x10);
+    else printf("nan");
+    printf(",%u,%u,%s,%lu,%u\r\n", (unsigned)ctrl.rate_valid,
+           (unsigned)IMU_IsCornerDetected(), WingState_ToString(ctrl.wing_state),
+           (unsigned long)sim.lateness_ms, (unsigned)sim.quality);
+}
+#else
 #define DIAG_LOG_PERIOD_MS 100U
 #define DIAG_LOG_LINE_SIZE 512U
 
@@ -189,3 +223,5 @@ void DiagLog_Task(void)
                  (int32_t)(fx.gravity_g[2] * 1000.0f));
     printf("%s\r\n", diag_line);
 }
+
+#endif /* APP_LAP_SIM_ENABLED */

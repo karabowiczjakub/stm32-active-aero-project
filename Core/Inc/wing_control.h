@@ -9,6 +9,7 @@
 #define WING_CONTROL_H_
 
 #include <stdint.h>
+#include "app_config.h"
 #include "app_types.h"
 
 
@@ -19,6 +20,10 @@ void Control_Update_From_Speed(
 
 
 void Control_ForceNormalForCorner(void);
+void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t tick_ms);
+#if APP_LAP_SIM_ENABLED
+void Control_Reset(void);
+#endif
 
 
 typedef struct

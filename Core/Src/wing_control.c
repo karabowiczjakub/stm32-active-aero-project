@@ -7,6 +7,8 @@
 
 
 #include "wing_control.h"
+#include "app_config.h"
+#include <string.h>
 
 #include "main.h"
 #include "app_types.h"
@@ -328,7 +330,33 @@ void Control_ForceNormalForCorner(void)
 
 void Control_Update_From_Speed(uint8_t speed_kmh)
 {
-    uint32_t now = HAL_GetTick();
+    Control_Update_From_SpeedAt(speed_kmh, HAL_GetTick());
+}
+
+#if APP_LAP_SIM_ENABLED
+void Control_Reset(void)
+{
+    memset(speed_history, 0, sizeof(speed_history));
+    speed_history_head = 0U;
+    speed_history_count = 0U;
+    motion_state = MOTION_COASTING;
+    wing_state = WING_NORMAL;
+    post_brake_hold_active = 0U;
+    post_brake_start_tick = 0U;
+    open_confirm_active = 0U;
+    open_confirm_start_tick = 0U;
+    diag_rate_valid = 0U;
+    diag_rate_x10 = 0;
+    diag_accel_mg = 0;
+    diag_filter_span_ms = 0U;
+    diag_filter_samples = 0U;
+    diag_brake_detected = 0U;
+    Servo_UpdateWingStateIfChanged(WING_NORMAL);
+}
+#endif
+
+void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t now)
+{
 
 
     SpeedHistory_Add(

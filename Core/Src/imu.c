@@ -7,6 +7,7 @@
 
 
 #include "imu.h"
+#include "app_config.h"
 
 #include "main.h"
 #include "debug_utils.h"
@@ -479,6 +480,7 @@ static int32_t Abs32(int32_t value)
 
 
 
+#if !APP_LAP_SIM_ENABLED
 static int32_t IMU_SelectAxis_mG(
     int32_t ax_mg,
     int32_t ay_mg,
@@ -503,6 +505,21 @@ static int32_t IMU_SelectAxis_mG(
 }
 
 
+
+#endif
+
+#if APP_LAP_SIM_ENABLED
+void IMU_ResetCornerDetection(void)
+{
+    corner_detected = 0U;
+    corner_on_counter = 0U;
+    corner_off_counter = 0U;
+    corner_detected_event = 0U;
+    imu_lateral_raw_mg = 0;
+    imu_lateral_filtered_mg = 0;
+    imu_lateral_filter_initialized = 0U;
+}
+#endif
 
 static void IMU_UpdateCornerDetection(void)
 {
@@ -552,14 +569,14 @@ static void IMU_UpdateCornerDetection(void)
 	imu_ay_mg = ay;
 	imu_az_mg = az;
 
-    imu_lateral_raw_mg =
-        IMU_SelectAxis_mG(
-            ax,
-            ay,
-            az,
-            CORNER_AXIS
-        );
+#if !APP_LAP_SIM_ENABLED
+    IMU_ProcessLateralSample_mG(IMU_SelectAxis_mG(ax, ay, az, CORNER_AXIS));
+#endif
+}
 
+void IMU_ProcessLateralSample_mG(int32_t lateral_mg)
+{
+    imu_lateral_raw_mg = lateral_mg;
 
     if (imu_lateral_filter_initialized == 0)
     {
@@ -613,6 +630,7 @@ static void IMU_UpdateCornerDetection(void)
             corner_detected_event = 1;
 
 
+#if !APP_LAP_SIM_ENABLED
             printf(
                 "CORNER DETECTED | lateral="
             );
@@ -624,6 +642,7 @@ static void IMU_UpdateCornerDetection(void)
 
 
             printf(" g\r\n");
+#endif
         }
     }
     else
@@ -651,6 +670,7 @@ static void IMU_UpdateCornerDetection(void)
             corner_on_counter = 0;
 
 
+#if !APP_LAP_SIM_ENABLED
             printf(
                 "CORNER CLEARED | lateral="
             );
@@ -662,6 +682,7 @@ static void IMU_UpdateCornerDetection(void)
 
 
             printf(" g\r\n");
+#endif
         }
     }
 }

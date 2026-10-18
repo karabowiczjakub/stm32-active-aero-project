@@ -9,6 +9,12 @@
 #define IMU_H_
 
 #include <stdint.h>
+#include "app_config.h"
+
+void IMU_ProcessLateralSample_mG(int32_t lateral_mg);
+#if APP_LAP_SIM_ENABLED
+void IMU_ResetCornerDetection(void);
+#endif
 
 
 	uint8_t LSM6DSO_Init(void);

@@ -30,6 +30,8 @@
 #include "obd.h"
 #include "motion_fx_app.h"
 #include "diag_log.h"
+#include "app_config.h"
+#include "lap_sim.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,7 +63,9 @@ TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7;
 
 /* USER CODE BEGIN PV */
+#if !APP_LAP_SIM_ENABLED
 static volatile uint8_t obd_request_due = 0U;
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -144,7 +148,9 @@ int main(void)
   /* -- Sample board code to send message over COM1 port ---- */
   printf("Welcome to STM32 world !\n\r");
 
+#if !APP_LAP_SIM_ENABLED
   CAN_Test_Init();
+#endif
 
 
   if (HAL_TIM_Base_Start_IT(&htim6) != HAL_OK)
@@ -191,6 +197,10 @@ int main(void)
           printf("MotionFX diagnostic ready\r\n");
       }
   }
+#if APP_LAP_SIM_ENABLED
+  BspButtonState = BUTTON_RELEASED;
+  LapSim_Init();
+#endif
   /* USER CODE END BSP */
 
   /* Infinite loop */
@@ -198,6 +208,14 @@ int main(void)
   while (1)
   {
 
+#if APP_LAP_SIM_ENABLED
+      if (BspButtonState == BUTTON_PRESSED)
+      {
+          BspButtonState = BUTTON_RELEASED;
+          LapSim_Start();
+      }
+      LapSim_Task();
+#endif
       IMU_Task();
 
 
@@ -207,6 +225,7 @@ int main(void)
 
 
 
+#if !APP_LAP_SIM_ENABLED
       if (IMU_TakeCornerDetectedEvent())
       {
           Control_ForceNormalForCorner();
@@ -232,6 +251,7 @@ int main(void)
           }
       }
 
+#endif
       DiagLog_Task();
 
 /*
@@ -573,7 +593,9 @@ void HAL_TIM_PeriodElapsedCallback(
 {
     if (htim->Instance == TIM6)
     {
+#if !APP_LAP_SIM_ENABLED
         obd_request_due = 1U;
+#endif
     }
 
     else if (htim->Instance == TIM7)
