@@ -9,6 +9,8 @@
 #define MOTION_FX_APP_H_
 
 #include <stdint.h>
+#include <stddef.h>
+#include <math.h>
 
 /*
  * 0 - MotionFX jest wylaczony.
@@ -31,6 +33,28 @@ typedef struct
     uint8_t valid;
 
 } MotionFxApp_Result_t;
+
+static inline uint8_t MotionFxApp_IsLoggable(float value)
+{
+    float scaled = value * 1000.0f;
+    return isfinite(value) && isfinite(scaled) &&
+           (double)scaled >= (double)INT32_MIN && (double)scaled <= (double)INT32_MAX;
+}
+
+static inline uint8_t MotionFxApp_IsResultValid(const MotionFxApp_Result_t *result)
+{
+    if (result == NULL || !result->valid) return 0U;
+    for (uint8_t i = 0U; i < 3U; i++)
+    {
+        if (!MotionFxApp_IsLoggable(result->gravity_g[i]) ||
+            !MotionFxApp_IsLoggable(result->linear_g[i]) ||
+            !MotionFxApp_IsLoggable(result->gyro_dps[i])) return 0U;
+    }
+    return MotionFxApp_IsLoggable(result->yaw_deg) &&
+           MotionFxApp_IsLoggable(result->pitch_deg) &&
+           MotionFxApp_IsLoggable(result->roll_deg) &&
+           MotionFxApp_IsLoggable(result->gyro_y_integral_deg);
+}
 
 uint8_t MotionFxApp_Init(void);
 

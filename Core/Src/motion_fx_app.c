@@ -6,6 +6,7 @@
  */
 
 #include "motion_fx_app.h"
+#include "app_config.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -35,6 +36,8 @@ static float gyro_y_integral_deg = 0.0f;
 uint8_t MotionFxApp_Init(void)
 {
 
+    mfx_initialized = 0U;
+    memset(&latest_result, 0, sizeof(latest_result));
     __HAL_RCC_CRC_CLK_ENABLE();
 
     if (MotionFX_GetStateSize() > sizeof(mfx_state))
@@ -46,7 +49,6 @@ uint8_t MotionFxApp_Init(void)
     memset(mfx_state, 0, sizeof(mfx_state));
     memset(&mfx_input, 0, sizeof(mfx_input));
     memset(&mfx_output, 0, sizeof(mfx_output));
-    memset(&latest_result, 0, sizeof(latest_result));
 
     MFXState_t state = (MFXState_t)mfx_state;
 
@@ -118,7 +120,13 @@ void MotionFxApp_Process(
 
     float dt = (float)delta_ms / 1000.0f;
 
-    gyro_y_integral_deg += gy_dps * dt;
+    if (!isfinite(ax_g) || !isfinite(ay_g) || !isfinite(az_g) ||
+        !isfinite(gx_dps) || !isfinite(gy_dps) || !isfinite(gz_dps))
+    {
+        latest_result.valid = 0U;
+        return;
+    }
+    float next_integral_deg = gyro_y_integral_deg + gy_dps * dt;
 
     mfx_input.acc[0] = ax_g;
     mfx_input.acc[1] = ay_g;
@@ -145,26 +153,34 @@ void MotionFxApp_Process(
         NULL
     );
 
+    MotionFxApp_Result_t result = {0};
     for (uint8_t i = 0U; i < 3U; i++)
     {
-        latest_result.gravity_g[i] =
+        result.gravity_g[i] =
             mfx_output.gravity[i];
 
-        latest_result.linear_g[i] =
+        result.linear_g[i] =
             mfx_output.linear_acceleration[i];
 
-        latest_result.gyro_dps[i] =
+        result.gyro_dps[i] =
             mfx_input.gyro[i];
     }
 
 
-    latest_result.yaw_deg = mfx_output.rotation[0];
-    latest_result.pitch_deg = mfx_output.rotation[1];
-    latest_result.roll_deg = mfx_output.rotation[2];
-    latest_result.gyro_y_integral_deg = gyro_y_integral_deg;
-
-    latest_result.timestamp_ms = timestamp_ms;
-    latest_result.valid = 1U;
+    result.yaw_deg = mfx_output.rotation[0];
+    result.pitch_deg = mfx_output.rotation[1];
+    result.roll_deg = mfx_output.rotation[2];
+    result.gyro_y_integral_deg = next_integral_deg;
+    result.timestamp_ms = timestamp_ms;
+    result.valid = 1U;
+    if (!MotionFxApp_IsResultValid(&result) ||
+        (uint32_t)(HAL_GetTick() - timestamp_ms) > APP_MOTIONFX_MAX_AGE_MS)
+    {
+        latest_result.valid = 0U;
+        return;
+    }
+    gyro_y_integral_deg = next_integral_deg;
+    latest_result = result;
 }
 
 
@@ -177,13 +193,13 @@ uint8_t MotionFxApp_GetLatest(
         return 0U;
     }
 
-    if (latest_result.valid == 0U)
+    if (!MotionFxApp_IsResultValid(&latest_result) ||
+        (uint32_t)(HAL_GetTick() - latest_result.timestamp_ms) > APP_MOTIONFX_MAX_AGE_MS)
     {
-        return 0U;
+        latest_result.valid = 0U;
     }
-
     *result = latest_result;
-    return 1U;
+    return latest_result.valid;
 }
 
 

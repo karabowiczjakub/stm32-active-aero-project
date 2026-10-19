@@ -12,9 +12,7 @@
 #include "app_config.h"
 
 void IMU_ProcessLateralSample_mG(int32_t lateral_mg);
-#if APP_LAP_SIM_ENABLED
 void IMU_ResetCornerDetection(void);
-#endif
 
 
 	uint8_t LSM6DSO_Init(void);
@@ -50,6 +48,9 @@ typedef struct
     uint8_t corner_on_count, corner_off_count;
     uint32_t i2c_error_count;
     uint32_t dma_start_error_count;
+    uint32_t dma_timeout_count;
+    uint32_t dma_abort_error_count;
+    uint8_t dma_recovering;
 } IMU_Diag_t;
 
 void IMU_GetDiagSnapshot(IMU_Diag_t *out);

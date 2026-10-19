@@ -24,6 +24,7 @@ typedef struct
 {
     FDCAN_RxHeaderTypeDef header;
     uint8_t data[8];
+    uint32_t tick_ms;
 
 } CAN_RxFrame_t;
 
@@ -45,6 +46,9 @@ static uint32_t obd_speed_rx_count = 0U;
 static uint32_t obd_request_queued_count = 0U;
 static uint32_t obd_tx_error_count = 0U;
 static uint32_t obd_response_timeout_count = 0U;
+
+static void CAN_ProcessFrame(const FDCAN_RxHeaderTypeDef *rx_header,
+                             const uint8_t *rx_data, uint32_t tick_ms);
 
 static uint8_t FDCAN_DLC_ToBytes(
     uint32_t dlc
@@ -567,11 +571,7 @@ void CAN_Poll_Rx(void)
                 rxData[2] == 0x0D
             )
             {
-            	uint8_t speed_kmh = rxData[3];
-
-            	obd_request_pending = 0U;
-
-            	Control_Update_From_Speed(speed_kmh);
+                CAN_ProcessFrame(&rxHeader, rxData, HAL_GetTick());
             }
 
 
@@ -620,6 +620,7 @@ void HAL_FDCAN_RxFifo0Callback(
         return;
     }
 
+    uint32_t tick_ms = HAL_GetTick();
     FDCAN_RxHeaderTypeDef rx_header;
     uint8_t rx_data[8];
 
@@ -650,6 +651,7 @@ void HAL_FDCAN_RxFifo0Callback(
 
     can_rx_queue[can_rx_head].header =
         rx_header;
+    can_rx_queue[can_rx_head].tick_ms = tick_ms;
 
 
     for (uint8_t i = 0U; i < 8U; i++)
@@ -666,7 +668,8 @@ void HAL_FDCAN_RxFifo0Callback(
 
 static void CAN_ProcessFrame(
     const FDCAN_RxHeaderTypeDef *rx_header,
-    const uint8_t *rx_data)
+    const uint8_t *rx_data,
+    uint32_t tick_ms)
 {
     /*
      * Standardowa odpowiedz ECU:
@@ -709,16 +712,24 @@ static void CAN_ProcessFrame(
         return;
     }
 
+    if ((uint32_t)(HAL_GetTick() - tick_ms) > APP_OBD_SPEED_MAX_AGE_MS)
+    {
+        return;
+    }
+
+#if !APP_LAP_SIM_ENABLED
+    Control_CheckDataFreshness();
+#endif
     uint8_t speed_kmh = rx_data[3];
 
     obd_last_speed_kmh = speed_kmh;
-    obd_last_speed_tick = HAL_GetTick();
+    obd_last_speed_tick = tick_ms;
     obd_speed_received = 1U;
     obd_speed_rx_count++;
 
     obd_request_pending = 0U;
 
-    Control_Update_From_Speed(speed_kmh);
+    Control_Update_From_SpeedAt(speed_kmh, tick_ms);
 }
 
 
@@ -739,7 +750,8 @@ void CAN_Process_Rx(void)
 
         CAN_ProcessFrame(
             &frame.header,
-            frame.data
+            frame.data,
+            frame.tick_ms
         );
     }
 }

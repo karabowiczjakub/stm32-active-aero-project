@@ -17,6 +17,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "app_config.h"
 
@@ -135,6 +136,12 @@ void DiagLog_Task(void)
     IMU_GetDiagSnapshot(&imu);
     Control_GetDiagSnapshot(&ctrl);
     uint8_t fx_valid = MotionFxApp_GetLatest(&fx);
+    if (!fx_valid || !MotionFxApp_IsResultValid(&fx) ||
+        (uint32_t)(now - fx.timestamp_ms) > APP_MOTIONFX_MAX_AGE_MS)
+    {
+        fx_valid = 0U;
+        memset(&fx, 0, sizeof(fx));
+    }
     uint32_t fx_age_ms = fx_valid ? (now - fx.timestamp_ms) : 0xFFFFFFFFU;
 
     size_t n = 0U;
@@ -191,12 +198,16 @@ void DiagLog_Task(void)
     Diag_Add3(diag_line, sizeof(diag_line), &n,
               "latFilt_g", imu.lateral_filtered_mg);
     Diag_Append(diag_line, sizeof(diag_line), &n,
-                " corner=%u on_n=%u off_n=%u i2c_err=%lu dma_err=%lu",
+                " corner=%u on_n=%u off_n=%u i2c_err=%lu dma_err=%lu"
+                " dma_timeout=%lu dma_abort_err=%lu dma_recovering=%u",
                 (unsigned)imu.corner,
                 (unsigned)imu.corner_on_count,
                 (unsigned)imu.corner_off_count,
                 (unsigned long)imu.i2c_error_count,
-                (unsigned long)imu.dma_start_error_count);
+                (unsigned long)imu.dma_start_error_count,
+                (unsigned long)imu.dma_timeout_count,
+                (unsigned long)imu.dma_abort_error_count,
+                (unsigned)imu.dma_recovering);
     printf("%s\r\n", diag_line);
 
     /* FX: ukl. wyjsciowy ENU zgodnie z knobs.output_type; NIE sa to osie IMU. */

@@ -1,5 +1,8 @@
 # Odtwarzanie telemetrii okrążenia na NUCLEO-G474RE
 
+Aktualny nadzór danych w trybie rzeczywistym opisano w [failsafe.md](failsafe.md).
+Nie blokuje on odtwarzania bez fizycznych czujników.
+
 ## Uruchomienie
 
 1. W `Core/Inc/app_config.h` ustaw `APP_LAP_SIM_ENABLED` na `1`.
@@ -88,7 +91,7 @@ Jakość jest zachowana informacyjnie; nie dodano nowej polityki odrzucania pró
 - Po każdej próbce bocznej zdarzenie z `IMU_TakeCornerDetectedEvent()` uruchamia
   `Control_ForceNormalForCorner()`. `IMU_IsCornerDetected()` zachowuje priorytet
   zakrętu w istniejącym sterowniku. Serwo i PWM nie zostały zmienione.
-- `Control_Reset()` i `IMU_ResetCornerDetection()` są dostępne tylko w symulacji.
+- `Control_Reset()` i `IMU_ResetCornerDetection()` są dostępne w obu trybach po dodaniu fail-safe.
   Start resetuje historię, potwierdzenia i detektor. Koniec/błąd resetuje również
   wewnętrzny stan skrzydła oraz ustawia rzeczywiste serwo w NORMAL.
 

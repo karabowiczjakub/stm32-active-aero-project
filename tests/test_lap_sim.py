@@ -24,7 +24,7 @@ def run(command):
     return result.stdout
 
 
-def compile_host(directory, mode, source_root=ROOT):
+def compile_host(directory, mode, source_root=ROOT, test_source=None, defines=(), motionfx=False):
     """Use the exact main-loop body/callbacks from main.c, replacing only its boot."""
     directory.mkdir(parents=True, exist_ok=True)
     main = (source_root / "Core/Src/main.c").read_text()
@@ -44,12 +44,15 @@ def compile_host(directory, mode, source_root=ROOT):
     for name in ("wing_control", "imu", "servo", "debug_utils", "diag_log", "obd", "lap_sim", "lap_data"):
         local = source_root / f"Core/Src/{name}.c"
         production.append(local if local.exists() else ROOT / f"Core/Src/{name}.c")
+    if motionfx:
+        production += [ROOT / "Core/Src/motion_fx_app.c", ROOT / "tests/host/motion_fx.c"]
+        defines = (*defines, "-DHOST_REAL_MOTIONFX=1", "-I" + str(ROOT / "MotionFX/Inc"))
     executable = directory / "controller"
     run(["gcc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
-         "-Wno-unused-function", "-Wno-comment", "-fsanitize=undefined",
-         "-fno-sanitize-recover=all", f"-DAPP_LAP_SIM_ENABLED={mode}",
+         "-Wno-unused-function", "-Wno-comment", "-fsanitize=undefined,float-cast-overflow",
+         "-fno-sanitize-recover=all", f"-DAPP_LAP_SIM_ENABLED={mode}", *defines,
          "-I", ROOT / "tests/host", "-I", source_root / "Core/Inc", "-I", ROOT / "Core/Inc",
-         *production, ROOT / "tests/host/hardware.c", ROOT / "tests/host/test_controller.c",
+         *production, ROOT / "tests/host/hardware.c", test_source or ROOT / "tests/host/test_controller.c",
          generated, "-lm", "-o", executable])
     return executable
 
@@ -115,7 +118,8 @@ class ControllerTests(unittest.TestCase):
         self.assertIn("FX t_ms=", output)
         self.assertIn("CORNER DETECTED", output)
         symbols = run(["nm", self.normal])
-        self.assertNotRegex(symbols, r"\b(?:LapSim_\w+|lap_data|Control_Reset)\b")
+        self.assertNotRegex(symbols, r"\b(?:LapSim_\w+|lap_data)\b")
+        self.assertRegex(symbols, r"\bControl_Reset\b")
 
     def test_main_source_selection(self):
         for mode in (0, 1):
@@ -128,12 +132,16 @@ class ControllerTests(unittest.TestCase):
 
     def test_normal_mode_matches_original_firmware_trace(self):
         output = run([self.normal, "normal_trace"])
-        # Captured from the original controller before this change (1001 iterations).
-        self.assertEqual(hashlib.sha256(output.encode()).hexdigest(),
-                         "a94104e3ff398e4fa628ce702def74b717e23c6da1bfe16f6459e854d940f98d")
+        def trace(text):
+            return "\n".join(line for line in text.splitlines() if line.startswith("TRACE,")) + "\n"
+
+        # 1001 snapshotow sprzed zmian, bez dodatkowych komunikatow failsafe
+        self.assertEqual(len(trace(output).splitlines()), 1001)
+        self.assertEqual(hashlib.sha256(trace(output).encode()).hexdigest(),
+                         "5f2fc19d98bec7cbfef8806d3671314e927d1d55057ed747d7338d33106ddd4d")
         if os.environ.get("LAP_BASELINE_DIR"):
             original = compile_host(self.directory / "baseline", 0, Path(os.environ["LAP_BASELINE_DIR"]))
-            self.assertEqual(run([original, "normal_trace"]), output)
+            self.assertEqual(trace(run([original, "normal_trace"])), trace(output))
 
 
 class GeneratorTests(unittest.TestCase):

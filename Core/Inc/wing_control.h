@@ -21,9 +21,14 @@ void Control_Update_From_Speed(
 
 void Control_ForceNormalForCorner(void);
 void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t tick_ms);
-#if APP_LAP_SIM_ENABLED
 void Control_Reset(void);
-#endif
+void Control_CheckDataFreshness(void);
+
+#define CONTROL_FAULT_OBD_MISSING 1U
+#define CONTROL_FAULT_OBD_STALE   2U
+#define CONTROL_FAULT_IMU_MISSING 4U
+#define CONTROL_FAULT_IMU_STALE   8U
+#define CONTROL_FAULT_RATE       16U
 
 
 typedef struct
@@ -32,6 +37,7 @@ typedef struct
     uint8_t motion_state; /* 0=acceleration, 1=coasting, 2=braking */
     uint8_t brake_detected;
     uint8_t rate_valid;
+    uint8_t failsafe_flags;
     int32_t rate_x10; /* 0.1 km/h/s */
     int32_t accel_mg; /* przyspieszenie z regresji OBD */
     uint32_t filter_span_ms;

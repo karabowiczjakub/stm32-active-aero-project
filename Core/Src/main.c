@@ -215,6 +215,8 @@ int main(void)
           LapSim_Start();
       }
       LapSim_Task();
+#else
+      Control_CheckDataFreshness();
 #endif
       IMU_Task();
 
