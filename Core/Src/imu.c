@@ -48,6 +48,10 @@ static uint16_t lsm6dso_addr =
 static uint8_t imu_dma_buffer[12];
 
 static volatile uint8_t imu_dma_busy = 0U;
+static volatile uint8_t imu_dma_recovering = 0U;
+static volatile uint32_t imu_dma_start_tick = 0U;
+static uint32_t imu_dma_timeout_count = 0U;
+static uint32_t imu_dma_abort_error_count = 0U;
 static volatile uint8_t imu_sample_ready = 0U;
 
 
@@ -143,32 +147,44 @@ static HAL_StatusTypeDef LSM6DSO_ReadMulti(
 
 
 
-static uint8_t LSM6DSO_StartAccelRead_DMA(void)
+static uint8_t LSM6DSO_InterfaceReady(void)
 {
-    if (imu_dma_busy != 0U)
+    return HAL_I2C_GetState(&hi2c1) == HAL_I2C_STATE_READY &&
+           hi2c1.Lock == HAL_UNLOCKED && hi2c1.hdmarx != NULL &&
+           HAL_DMA_GetState(hi2c1.hdmarx) == HAL_DMA_STATE_READY &&
+           __HAL_I2C_GET_FLAG(&hi2c1, I2C_FLAG_BUSY) == RESET &&
+           (hi2c1.Instance->CR1 & I2C_CR1_RXDMAEN) == 0U;
+}
+
+static uint8_t LSM6DSO_StartRead_DMA(ImuDmaTransfer_t transfer, uint8_t reg,
+                                    uint8_t *data, uint16_t size)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    if (imu_dma_busy || imu_dma_recovering || !LSM6DSO_InterfaceReady())
     {
+        __set_PRIMASK(primask);
         return 0U;
     }
 
     imu_dma_busy = 1U;
-    imu_dma_transfer = IMU_DMA_ACCEL;
-
-    if (HAL_I2C_Mem_Read_DMA(
-            &hi2c1,
-            lsm6dso_addr,
-            LSM6DSO_OUTX_L_G,
-            I2C_MEMADD_SIZE_8BIT,
-            imu_dma_buffer,
-            12U
-        ) != HAL_OK)
+    imu_dma_transfer = transfer;
+    imu_dma_start_tick = HAL_GetTick();
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Read_DMA(&hi2c1, lsm6dso_addr, reg,
+                                                  I2C_MEMADD_SIZE_8BIT, data, size);
+    if (status != HAL_OK)
     {
         imu_dma_busy = 0U;
         imu_dma_transfer = IMU_DMA_NONE;
         imu_dma_start_error_count++;
-        return 0U;
     }
+    __set_PRIMASK(primask);
+    return status == HAL_OK;
+}
 
-    return 1U;
+static uint8_t LSM6DSO_StartAccelRead_DMA(void)
+{
+    return LSM6DSO_StartRead_DMA(IMU_DMA_ACCEL, LSM6DSO_OUTX_L_G, imu_dma_buffer, 12U);
 }
 
 
@@ -183,30 +199,7 @@ static int32_t LSM6DSO_AccelRaw_To_mG(
 
 static uint8_t LSM6DSO_StartStatusRead_DMA(void)
 {
-    if (imu_dma_busy != 0U)
-    {
-        return 0U;
-    }
-
-    imu_dma_busy = 1U;
-    imu_dma_transfer = IMU_DMA_STATUS;
-
-    if (HAL_I2C_Mem_Read_DMA(
-            &hi2c1,
-            lsm6dso_addr,
-            LSM6DSO_STATUS_REG,
-            I2C_MEMADD_SIZE_8BIT,
-            &imu_status_reg,
-            1U) != HAL_OK)
-    {
-        imu_dma_busy = 0U;
-        imu_dma_transfer = IMU_DMA_NONE;
-        imu_dma_start_error_count++;
-
-        return 0U;
-    }
-
-    return 1U;
+    return LSM6DSO_StartRead_DMA(IMU_DMA_STATUS, LSM6DSO_STATUS_REG, &imu_status_reg, 1U);
 }
 
 uint8_t LSM6DSO_Init(void)
@@ -508,7 +501,6 @@ static int32_t IMU_SelectAxis_mG(
 
 #endif
 
-#if APP_LAP_SIM_ENABLED
 void IMU_ResetCornerDetection(void)
 {
     corner_detected = 0U;
@@ -519,7 +511,6 @@ void IMU_ResetCornerDetection(void)
     imu_lateral_filtered_mg = 0;
     imu_lateral_filter_initialized = 0U;
 }
-#endif
 
 static void IMU_UpdateCornerDetection(void)
 {
@@ -691,7 +682,9 @@ void IMU_ProcessLateralSample_mG(int32_t lateral_mg)
 void HAL_I2C_MemRxCpltCallback(
     I2C_HandleTypeDef *hi2c)
 {
-    if (hi2c->Instance != I2C1)
+    if (hi2c->Instance != I2C1 || !imu_dma_busy || imu_dma_recovering ||
+        !LSM6DSO_InterfaceReady() ||
+        (uint32_t)(HAL_GetTick() - imu_dma_start_tick) >= APP_IMU_DMA_TIMEOUT_MS)
     {
         return;
     }
@@ -734,21 +727,92 @@ void HAL_I2C_ErrorCallback(
     if (hi2c->Instance == I2C1)
     {
         imu_i2c_error_count++;
-        imu_dma_busy = 0U;
+        if (!imu_dma_recovering) imu_dma_start_tick = HAL_GetTick() - APP_IMU_DMA_TIMEOUT_MS;
+        imu_dma_recovering = 1U;
+        imu_dma_busy = 1U;
         imu_dma_transfer = IMU_DMA_NONE;
-
         imu_accel_read_due = 0U;
+        imu_sample_ready = 0U;
+        imu_gyro_ready_for_sample = 0U;
     }
 }
 
 
+void HAL_I2C_AbortCpltCallback(I2C_HandleTypeDef *hi2c)
+{
+    if (hi2c->Instance == I2C1 && imu_dma_recovering)
+    {
+        imu_dma_transfer = IMU_DMA_NONE;
+        imu_accel_read_due = 0U;
+        imu_sample_ready = 0U;
+        imu_gyro_ready_for_sample = 0U;
+    }
+}
+
+static void IMU_CheckDmaTimeout(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    uint32_t now = HAL_GetTick();
+    if (imu_dma_busy && !imu_dma_recovering &&
+        (uint32_t)(now - imu_dma_start_tick) >= APP_IMU_DMA_TIMEOUT_MS)
+    {
+        imu_dma_timeout_count++;
+        imu_dma_recovering = 1U;
+        imu_dma_transfer = IMU_DMA_NONE;
+        imu_accel_read_due = 0U;
+        imu_sample_ready = 0U;
+        imu_gyro_ready_for_sample = 0U;
+    }
+    if (imu_dma_recovering)
+    {
+        if (LSM6DSO_InterfaceReady())
+        {
+            imu_dma_recovering = 0U;
+            imu_dma_busy = 0U;
+            imu_read_due = 1U;
+        }
+        else if ((uint32_t)(now - imu_dma_start_tick) >= APP_IMU_DMA_TIMEOUT_MS &&
+                 HAL_I2C_GetState(&hi2c1) != HAL_I2C_STATE_ABORT)
+        {
+            imu_dma_start_tick = now;
+            HAL_StatusTypeDef status;
+            if (HAL_I2C_GetState(&hi2c1) == HAL_I2C_STATE_READY &&
+                hi2c1.hdmarx != NULL && HAL_DMA_GetState(hi2c1.hdmarx) == HAL_DMA_STATE_BUSY)
+            {
+                status = HAL_DMA_Abort_IT(hi2c1.hdmarx);
+            }
+            else
+            {
+                status = HAL_I2C_Master_Abort_IT(&hi2c1, lsm6dso_addr);
+            }
+            if (status != HAL_OK) imu_dma_abort_error_count++;
+        }
+    }
+    __set_PRIMASK(primask);
+}
+
 void IMU_Task(void)
 {
+    IMU_CheckDmaTimeout();
+    if (imu_sample_ready &&
+        (uint32_t)(HAL_GetTick() - imu_sample_tick_ms) > APP_IMU_MAX_AGE_MS)
+    {
+        imu_sample_ready = 0U;
+        imu_read_due = 1U;
+    }
 
 	if (imu_sample_ready != 0U)
 	{
 	    imu_sample_ready = 0U;
 
+#if !APP_LAP_SIM_ENABLED
+        if (imu_has_sample &&
+            (uint32_t)(imu_sample_tick_ms - imu_last_processed_tick) > APP_IMU_MAX_AGE_MS)
+        {
+            IMU_ResetCornerDetection();
+        }
+#endif
 	    IMU_UpdateCornerDetection();
 
 	    imu_last_processed_tick = imu_sample_tick_ms;
@@ -877,6 +941,9 @@ void IMU_GetDiagSnapshot(IMU_Diag_t *out)
     out->corner_off_count = corner_off_counter;
     out->i2c_error_count = imu_i2c_error_count;
     out->dma_start_error_count = imu_dma_start_error_count;
+    out->dma_timeout_count = imu_dma_timeout_count;
+    out->dma_abort_error_count = imu_dma_abort_error_count;
+    out->dma_recovering = imu_dma_recovering;
 }
 
 uint8_t IMU_GetAccelSnapshot(

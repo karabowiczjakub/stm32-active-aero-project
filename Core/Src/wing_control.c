@@ -14,6 +14,7 @@
 #include "app_types.h"
 #include "servo.h"
 #include "imu.h"
+#include "obd.h"
 #include "debug_utils.h"
 
 #include <stdio.h>
@@ -74,6 +75,7 @@ static uint8_t open_confirm_active = 0U;
 static uint32_t open_confirm_start_tick = 0U;
 
 
+static uint8_t control_fault_flags = 0U;
 static uint8_t diag_rate_valid = 0U;
 static int32_t diag_rate_x10 = 0;
 static int32_t diag_accel_mg = 0;
@@ -292,6 +294,7 @@ void Control_GetDiagSnapshot(Control_Diag_t *out)
     out->motion_state = (uint8_t)motion_state;
     out->brake_detected = diag_brake_detected;
     out->rate_valid = diag_rate_valid;
+    out->failsafe_flags = control_fault_flags;
     out->rate_x10 = diag_rate_x10;
     out->accel_mg = diag_accel_mg;
     out->filter_span_ms = diag_filter_span_ms;
@@ -333,7 +336,6 @@ void Control_Update_From_Speed(uint8_t speed_kmh)
     Control_Update_From_SpeedAt(speed_kmh, HAL_GetTick());
 }
 
-#if APP_LAP_SIM_ENABLED
 void Control_Reset(void)
 {
     memset(speed_history, 0, sizeof(speed_history));
@@ -353,10 +355,53 @@ void Control_Reset(void)
     diag_brake_detected = 0U;
     Servo_UpdateWingStateIfChanged(WING_NORMAL);
 }
+
+#if !APP_LAP_SIM_ENABLED
+static void Control_SetFaults(uint8_t faults)
+{
+    if (faults != control_fault_flags)
+    {
+        control_fault_flags = faults;
+        printf("FAILSAFE flags=%u\r\n", (unsigned)faults);
+    }
+}
 #endif
+
+void Control_CheckDataFreshness(void)
+{
+#if !APP_LAP_SIM_ENABLED
+    OBD_Diag_t obd;
+    IMU_Diag_t imu;
+    OBD_GetDiagSnapshot(&obd);
+    IMU_GetDiagSnapshot(&imu);
+    uint8_t faults = 0U;
+    const uint8_t source_mask = CONTROL_FAULT_OBD_MISSING | CONTROL_FAULT_OBD_STALE |
+                                CONTROL_FAULT_IMU_MISSING | CONTROL_FAULT_IMU_STALE;
+
+    if (!obd.speed_valid) faults |= CONTROL_FAULT_OBD_MISSING;
+    else if (obd.speed_age_ms > APP_OBD_SPEED_MAX_AGE_MS) faults |= CONTROL_FAULT_OBD_STALE;
+    if (!imu.valid) faults |= CONTROL_FAULT_IMU_MISSING;
+    else if (imu.age_ms > APP_IMU_MAX_AGE_MS) faults |= CONTROL_FAULT_IMU_STALE;
+
+    if (faults != 0U && (control_fault_flags & source_mask) == 0U)
+    {
+        Control_Reset();
+    }
+    if (!diag_rate_valid) faults |= CONTROL_FAULT_RATE;
+    Control_SetFaults(faults);
+#endif
+}
 
 void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t now)
 {
+#if !APP_LAP_SIM_ENABLED
+    Control_CheckDataFreshness();
+    if (control_fault_flags & (CONTROL_FAULT_OBD_MISSING | CONTROL_FAULT_OBD_STALE |
+                              CONTROL_FAULT_IMU_MISSING | CONTROL_FAULT_IMU_STALE))
+    {
+        return;
+    }
+#endif
 
 
     SpeedHistory_Add(
@@ -385,6 +430,9 @@ void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t now)
     diag_filter_span_ms = filter_span_ms;
     diag_filter_samples = filter_samples;
     diag_brake_detected = 0U;
+#if !APP_LAP_SIM_ENABLED
+    if (rate_valid) Control_SetFaults(0U);
+#endif
 
 
     /*
@@ -412,6 +460,14 @@ void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t now)
 
     if (rate_valid == 0U)
     {
+        motion_state = MOTION_COASTING;
+        wing_state = WING_NORMAL;
+        open_confirm_active = 0U;
+        post_brake_hold_active = 0U;
+        Servo_UpdateWingStateIfChanged(WING_NORMAL);
+#if !APP_LAP_SIM_ENABLED
+        Control_SetFaults(CONTROL_FAULT_RATE);
+#endif
         return;
     }
 

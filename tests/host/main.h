@@ -5,7 +5,19 @@
 #include <stdio.h>
 
 typedef enum { HAL_OK = 0, HAL_ERROR, HAL_BUSY } HAL_StatusTypeDef;
-typedef struct { void *Instance; } I2C_HandleTypeDef;
+typedef enum { HAL_I2C_STATE_READY, HAL_I2C_STATE_BUSY_RX, HAL_I2C_STATE_ABORT } HAL_I2C_StateTypeDef;
+typedef enum { HAL_DMA_STATE_READY, HAL_DMA_STATE_BUSY } HAL_DMA_StateTypeDef;
+typedef enum { HAL_UNLOCKED, HAL_LOCKED } HAL_LockTypeDef;
+typedef enum { HAL_I2C_MODE_NONE, HAL_I2C_MODE_MEM } HAL_I2C_ModeTypeDef;
+typedef struct { uint32_t CR1, ISR; } I2C_TypeDef;
+typedef struct { HAL_DMA_StateTypeDef State; } DMA_HandleTypeDef;
+typedef struct {
+    I2C_TypeDef *Instance;
+    HAL_I2C_StateTypeDef State;
+    HAL_I2C_ModeTypeDef Mode;
+    HAL_LockTypeDef Lock;
+    DMA_HandleTypeDef *hdmarx;
+} I2C_HandleTypeDef;
 typedef struct { void *Instance; } TIM_HandleTypeDef;
 typedef struct { void *Instance; } FDCAN_HandleTypeDef;
 typedef struct {
@@ -18,7 +30,13 @@ typedef struct {
 } FDCAN_FilterTypeDef;
 typedef enum { BUTTON_USER = 0 } Button_TypeDef;
 
-#define I2C1 ((void *)1)
+extern I2C_TypeDef host_i2c;
+#define I2C1 (&host_i2c)
+#define I2C_FLAG_BUSY 1U
+#define I2C_CR1_RXDMAEN 2U
+#define RESET 0U
+#define __HAL_I2C_GET_FLAG(handle, flag) ((handle)->Instance->ISR & (flag))
+#define __HAL_RCC_CRC_CLK_ENABLE() ((void)0)
 #define TIM2 ((void *)2)
 #define TIM6 ((void *)6)
 #define TIM7 ((void *)7)
@@ -57,6 +75,21 @@ extern uint32_t BspButtonState;
 extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim2, htim6, htim7;
 extern FDCAN_HandleTypeDef hfdcan1;
+extern DMA_HandleTypeDef host_dma;
+extern uint32_t host_dma_starts, host_abort_calls, host_dma_abort_calls, host_primask;
+extern HAL_StatusTypeDef host_read_dma_status, host_abort_status, host_dma_abort_status;
+extern void (*host_before_disable_hook)(void);
+void Host_CompleteIMU(uint8_t status, int16_t lateral_raw);
+void Host_SetI2CReady(void);
+void Host_AbortComplete(void);
+void Host_I2CError(void);
+uint32_t __get_PRIMASK(void);
+void __disable_irq(void);
+void __set_PRIMASK(uint32_t value);
+HAL_I2C_StateTypeDef HAL_I2C_GetState(const I2C_HandleTypeDef *);
+HAL_DMA_StateTypeDef HAL_DMA_GetState(DMA_HandleTypeDef *);
+HAL_StatusTypeDef HAL_I2C_Master_Abort_IT(I2C_HandleTypeDef *, uint16_t);
+HAL_StatusTypeDef HAL_DMA_Abort_IT(DMA_HandleTypeDef *);
 uint32_t HAL_GetTick(void);
 void Error_Handler(void);
 HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef *, uint16_t, uint16_t, uint16_t, uint8_t *, uint16_t, uint32_t);

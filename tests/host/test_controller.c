@@ -248,7 +248,7 @@ static void full_lap(uint32_t origin)
     host_tick+=500U;
     Host_MainLoopOnce();
     assert(simulation().state == LAP_SIM_FINISHED && simulation().lateral_samples == 5226U);
-    assert(host_can_tx == 0U);
+    assert(host_can_tx == 0U && host_fx_calls == 0U);
 }
 static void small_delay(uint32_t delay)
 {
