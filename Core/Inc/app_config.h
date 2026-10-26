@@ -1,8 +1,31 @@
 #ifndef APP_CONFIG_H_
 #define APP_CONFIG_H_
 
+#define ACC_SOURCE_RAW_IMU 0U
+#define ACC_SOURCE_MOTIONFX 1U
+
+#ifndef APP_ACC_SOURCE
+#define APP_ACC_SOURCE ACC_SOURCE_RAW_IMU
+#endif
+#ifndef MOTIONFX_FILTER_ENABLE
+#define MOTIONFX_FILTER_ENABLE 1
+#endif
+#ifndef MOTIONFX_FILTER_DIVISOR
+#define MOTIONFX_FILTER_DIVISOR 4
+#endif
+
+#if APP_ACC_SOURCE != ACC_SOURCE_RAW_IMU && APP_ACC_SOURCE != ACC_SOURCE_MOTIONFX
+#error "invalid acceleration source"
+#endif
+#if MOTIONFX_FILTER_ENABLE != 0 && MOTIONFX_FILTER_ENABLE != 1
+#error "invalid motionfx filter enable"
+#endif
+#if MOTIONFX_FILTER_DIVISOR < 1
+#error "invalid motionfx filter divisor"
+#endif
+
 #ifndef APP_LAP_SIM_ENABLED
-#define APP_LAP_SIM_ENABLED 1
+#define APP_LAP_SIM_ENABLED 0
 #endif
 
 /* Less than one 20 ms sample: never replay several stale lateral decisions. */

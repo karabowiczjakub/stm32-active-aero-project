@@ -72,6 +72,7 @@ static uint8_t imu_gyro_ready_for_sample = 0U;
 
 static uint32_t imu_last_processed_tick = 0U;
 static uint8_t imu_has_sample = 0U;
+static uint32_t imu_sample_id = 0U;
 static volatile uint32_t imu_i2c_error_count = 0U;
 static uint32_t imu_dma_start_error_count = 0U;
 
@@ -817,6 +818,7 @@ void IMU_Task(void)
 
 	    imu_last_processed_tick = imu_sample_tick_ms;
 	    imu_has_sample = 1U;
+        if (++imu_sample_id == 0U) imu_sample_id = 1U;
 
 
 	    if (imu_gyro_ready_for_sample != 0U)
@@ -965,4 +967,47 @@ uint8_t IMU_GetAccelSnapshot(
     *age_ms = HAL_GetTick() - imu_last_processed_tick;
 
     return 1U;
+}
+
+uint8_t IMU_GetAccelerationFromSource(uint8_t source, IMU_Acceleration_t *out)
+{
+    if (out == NULL) return 0U;
+    *out = (IMU_Acceleration_t){.source = source, .age_ms = UINT32_MAX};
+    if (source == ACC_SOURCE_RAW_IMU)
+    {
+        out->timestamp_ms = imu_last_processed_tick;
+        out->sample_id = imu_sample_id;
+        if (imu_has_sample)
+        {
+            out->age_ms = HAL_GetTick() - imu_last_processed_tick;
+            out->valid = out->age_ms <= APP_IMU_MAX_AGE_MS;
+        }
+        if (out->valid)
+        {
+            out->acc_longitudinal_mg = imu_ax_mg;
+            out->acc_lateral_mg = imu_ay_mg;
+            out->acc_vertical_mg = imu_az_mg;
+        }
+    }
+    else if (source == ACC_SOURCE_MOTIONFX)
+    {
+        MotionFxApp_Result_t fx = {0};
+        uint8_t valid = MotionFxApp_GetLatest(&fx);
+        out->timestamp_ms = fx.timestamp_ms;
+        out->sample_id = fx.sample_id;
+        if (fx.sample_id != 0U) out->age_ms = HAL_GetTick() - fx.timestamp_ms;
+        if (valid && MotionFxApp_IsResultValid(&fx) && out->age_ms <= APP_MOTIONFX_MAX_AGE_MS)
+        {
+            out->acc_longitudinal_mg = (int32_t)(fx.acc_longitudinal_filtered_g * 1000.0f);
+            out->acc_lateral_mg = (int32_t)(fx.acc_lateral_filtered_g * 1000.0f);
+            out->acc_vertical_mg = (int32_t)(fx.acc_vertical_g * 1000.0f);
+            out->valid = 1U;
+        }
+    }
+    return out->valid;
+}
+
+uint8_t IMU_GetAccelerationSnapshot(IMU_Acceleration_t *out)
+{
+    return IMU_GetAccelerationFromSource(APP_ACC_SOURCE, out);
 }

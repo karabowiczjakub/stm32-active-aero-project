@@ -56,7 +56,7 @@ class UartLogTests(unittest.TestCase):
         dma = subprocess.run([self.images[0, True], "integration"],
                              capture_output=True, check=True).stdout
         self.assertEqual(dma, direct)
-        for prefix in ("VEH ", "IMU ", "FX ", "FAILSAFE ", "SERVO STATE"):
+        for prefix in ("VEH ", "IMU ", "IMU_FX ", "FAILSAFE ", "SERVO STATE"):
             self.assertIn(prefix.encode(), dma)
 
     def test_complete_simulator_log_stream_is_unchanged(self):

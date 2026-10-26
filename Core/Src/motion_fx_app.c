@@ -31,6 +31,33 @@ static uint8_t mfx_initialized = 0U;
 static uint8_t first_sample = 1U;
 static uint32_t previous_tick_ms = 0U;
 static float gyro_y_integral_deg = 0.0f;
+static uint32_t mfx_sample_id = 0U;
+
+static void MotionFxApp_MapVehicleAxes(MotionFxApp_Result_t *result)
+{
+    // robocze mapowanie, do sprawdzenia w pojezdzie
+    result->acc_longitudinal_g = result->linear_g[1];
+    result->acc_lateral_g = -result->linear_g[0];
+    result->acc_vertical_g = result->linear_g[2];
+}
+
+static void MotionFxApp_FilterAcceleration(MotionFxApp_Result_t *result)
+{
+    result->acc_longitudinal_filtered_g = result->acc_longitudinal_g;
+    result->acc_lateral_filtered_g = result->acc_lateral_g;
+#if MOTIONFX_FILTER_ENABLE
+    if (latest_result.valid &&
+        (uint32_t)(result->timestamp_ms - latest_result.timestamp_ms) <= APP_MOTIONFX_MAX_AGE_MS)
+    {
+        result->acc_longitudinal_filtered_g = latest_result.acc_longitudinal_filtered_g +
+            (result->acc_longitudinal_g - latest_result.acc_longitudinal_filtered_g) /
+            (float)MOTIONFX_FILTER_DIVISOR;
+        result->acc_lateral_filtered_g = latest_result.acc_lateral_filtered_g +
+            (result->acc_lateral_g - latest_result.acc_lateral_filtered_g) /
+            (float)MOTIONFX_FILTER_DIVISOR;
+    }
+#endif
+}
 
 
 uint8_t MotionFxApp_Init(void)
@@ -173,12 +200,21 @@ void MotionFxApp_Process(
     result.gyro_y_integral_deg = next_integral_deg;
     result.timestamp_ms = timestamp_ms;
     result.valid = 1U;
+    MotionFxApp_MapVehicleAxes(&result);
     if (!MotionFxApp_IsResultValid(&result) ||
         (uint32_t)(HAL_GetTick() - timestamp_ms) > APP_MOTIONFX_MAX_AGE_MS)
     {
         latest_result.valid = 0U;
         return;
     }
+    MotionFxApp_FilterAcceleration(&result);
+    if (!MotionFxApp_IsResultValid(&result))
+    {
+        latest_result.valid = 0U;
+        return;
+    }
+    if (++mfx_sample_id == 0U) mfx_sample_id = 1U;
+    result.sample_id = mfx_sample_id;
     gyro_y_integral_deg = next_integral_deg;
     latest_result = result;
 }
@@ -217,7 +253,9 @@ void MotionFxApp_PrintDebug(void)
         "pitch_mdeg=%ld "
         "lin_mg=%ld,%ld,%ld "
         "grav_mg=%ld,%ld,%ld "
-        "gyro_mdps=%ld,%ld,%ld\r\n",
+        "gyro_mdps=%ld,%ld,%ld "
+        "longRaw_mg=%ld latRaw_mg=%ld longFilt_mg=%ld latFilt_mg=%ld "
+        "sample_ms=%lu seq=%lu valid=1 age_ms=%lu\r\n",
 
         (unsigned long)result.timestamp_ms,
 
@@ -233,7 +271,14 @@ void MotionFxApp_PrintDebug(void)
 
         (long)(result.gyro_dps[0] * 1000.0f),
         (long)(result.gyro_dps[1] * 1000.0f),
-        (long)(result.gyro_dps[2] * 1000.0f)
+        (long)(result.gyro_dps[2] * 1000.0f),
+        (long)(result.acc_longitudinal_g * 1000.0f),
+        (long)(result.acc_lateral_g * 1000.0f),
+        (long)(result.acc_longitudinal_filtered_g * 1000.0f),
+        (long)(result.acc_lateral_filtered_g * 1000.0f),
+        (unsigned long)result.timestamp_ms,
+        (unsigned long)result.sample_id,
+        (unsigned long)(HAL_GetTick() - result.timestamp_ms)
     );
 }
 
@@ -265,7 +310,7 @@ uint8_t MotionFxApp_GetLatest(
     MotionFxApp_Result_t *result
 )
 {
-    (void)result;
+    if (result != NULL) memset(result, 0, sizeof(*result));
     return 0U;
 }
 

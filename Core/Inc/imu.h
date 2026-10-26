@@ -39,6 +39,21 @@ void IMU_ResetCornerDetection(void);
 
 typedef struct
 {
+    int32_t acc_longitudinal_mg;
+    int32_t acc_lateral_mg;
+    int32_t acc_vertical_mg;
+    uint32_t timestamp_ms;
+    uint32_t age_ms;
+    uint32_t sample_id;
+    uint8_t source;
+    uint8_t valid;
+} IMU_Acceleration_t;
+
+uint8_t IMU_GetAccelerationSnapshot(IMU_Acceleration_t *out);
+uint8_t IMU_GetAccelerationFromSource(uint8_t source, IMU_Acceleration_t *out);
+
+typedef struct
+{
     uint8_t valid;
     uint32_t age_ms;
     int32_t ax_mg, ay_mg, az_mg;

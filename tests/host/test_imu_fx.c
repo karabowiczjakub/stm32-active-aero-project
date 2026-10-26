@@ -301,12 +301,14 @@ static void init_failure(void)
 static void logger_defense(void)
 {
     init_fx(); logger_result=fx(); inject_logger=1U;
-    float *fields[13]={&logger_result.gravity_g[0],&logger_result.gravity_g[1],&logger_result.gravity_g[2],
+    float *fields[18]={&logger_result.gravity_g[0],&logger_result.gravity_g[1],&logger_result.gravity_g[2],
         &logger_result.linear_g[0],&logger_result.linear_g[1],&logger_result.linear_g[2],
         &logger_result.gyro_dps[0],&logger_result.gyro_dps[1],&logger_result.gyro_dps[2],
-        &logger_result.yaw_deg,&logger_result.pitch_deg,&logger_result.roll_deg,&logger_result.gyro_y_integral_deg};
+        &logger_result.yaw_deg,&logger_result.pitch_deg,&logger_result.roll_deg,&logger_result.gyro_y_integral_deg,
+        &logger_result.acc_longitudinal_g,&logger_result.acc_lateral_g,&logger_result.acc_vertical_g,
+        &logger_result.acc_longitudinal_filtered_g,&logger_result.acc_lateral_filtered_g};
     const float bad[]={NAN,INFINITY,-INFINITY,FLT_MAX,2147483.75f,-2147484.0f};
-    for (unsigned i=0;i<13U;i++)
+    for (unsigned i=0;i<18U;i++)
     {
         float previous=*fields[i];
         for (unsigned j=0;j<sizeof(bad)/sizeof(bad[0]);j++)

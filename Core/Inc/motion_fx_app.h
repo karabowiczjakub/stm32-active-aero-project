@@ -16,7 +16,9 @@
  * 0 - MotionFX jest wylaczony.
  * 1 - MotionFX pracuje diagnostycznie.
  */
+#ifndef MOTIONFX_DIAG_ENABLE
 #define MOTIONFX_DIAG_ENABLE 1
+#endif
 
 typedef struct
 {
@@ -29,7 +31,14 @@ typedef struct
     float roll_deg;
     float gyro_y_integral_deg; /* surowe calkowanie, nie orientacja */
 
+    float acc_longitudinal_g;
+    float acc_lateral_g;
+    float acc_vertical_g;
+    float acc_longitudinal_filtered_g;
+    float acc_lateral_filtered_g;
+
     uint32_t timestamp_ms;
+    uint32_t sample_id;
     uint8_t valid;
 
 } MotionFxApp_Result_t;
@@ -53,7 +62,12 @@ static inline uint8_t MotionFxApp_IsResultValid(const MotionFxApp_Result_t *resu
     return MotionFxApp_IsLoggable(result->yaw_deg) &&
            MotionFxApp_IsLoggable(result->pitch_deg) &&
            MotionFxApp_IsLoggable(result->roll_deg) &&
-           MotionFxApp_IsLoggable(result->gyro_y_integral_deg);
+           MotionFxApp_IsLoggable(result->gyro_y_integral_deg) &&
+           MotionFxApp_IsLoggable(result->acc_longitudinal_g) &&
+           MotionFxApp_IsLoggable(result->acc_lateral_g) &&
+           MotionFxApp_IsLoggable(result->acc_vertical_g) &&
+           MotionFxApp_IsLoggable(result->acc_longitudinal_filtered_g) &&
+           MotionFxApp_IsLoggable(result->acc_lateral_filtered_g);
 }
 
 uint8_t MotionFxApp_Init(void);

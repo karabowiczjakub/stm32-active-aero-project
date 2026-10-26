@@ -54,7 +54,7 @@ void DiagLog_Task(void)
 }
 #else
 #define DIAG_LOG_PERIOD_MS 100U
-#define DIAG_LOG_LINE_SIZE 512U
+#define DIAG_LOG_LINE_SIZE 640U
 
 static char diag_line[DIAG_LOG_LINE_SIZE];
 static uint32_t diag_last_log_tick = 0U;
@@ -93,6 +93,13 @@ static void Diag_Format3(char *out, size_t out_len, int32_t milli)
                    (unsigned long)(abs_v % 1000U));
 }
 
+static void Diag_AddAge(char *buf, size_t cap, size_t *used,
+                        const char *name, uint32_t age_ms, uint8_t known)
+{
+    if (known) Diag_Append(buf, cap, used, " %s=%lu", name, (unsigned long)age_ms);
+    else Diag_Append(buf, cap, used, " %s=-1", name);
+}
+
 static void Diag_Add3(char *buf, size_t cap, size_t *used,
                       const char *name, int32_t milli)
 {
@@ -123,7 +130,7 @@ void DiagLog_Task(void)
     if (diag_first_log)
     {
         diag_first_log = 0U;
-        printf("LOG_INFO version=1 period_ms=%u units: speed=km/h; accel=g; gyro=deg/s; angles=deg; time=ms\r\n",
+        printf("LOG_INFO version=2 period_ms=%u units: speed=km/h; accel=g; *_mg=mg; gyro=deg/s; angles=deg; time=ms; fx_vectors=device; fx_map=Y,-X,Z provisional=1; control_acc=RAW\r\n",
                (unsigned)DIAG_LOG_PERIOD_MS);
     }
 
@@ -131,18 +138,23 @@ void DiagLog_Task(void)
     IMU_Diag_t imu = {0};
     Control_Diag_t ctrl = {0};
     MotionFxApp_Result_t fx = {0};
+    IMU_Acceleration_t acc, raw_acc;
 
     OBD_GetDiagSnapshot(&obd);
     IMU_GetDiagSnapshot(&imu);
     Control_GetDiagSnapshot(&ctrl);
+    IMU_GetAccelerationSnapshot(&acc);
+    IMU_GetAccelerationFromSource(ACC_SOURCE_RAW_IMU, &raw_acc);
     uint8_t fx_valid = MotionFxApp_GetLatest(&fx);
+    uint32_t fx_sample_ms = fx.timestamp_ms;
+    uint32_t fx_sample_id = fx.sample_id;
+    uint32_t fx_age_ms = now - fx.timestamp_ms;
     if (!fx_valid || !MotionFxApp_IsResultValid(&fx) ||
         (uint32_t)(now - fx.timestamp_ms) > APP_MOTIONFX_MAX_AGE_MS)
     {
         fx_valid = 0U;
         memset(&fx, 0, sizeof(fx));
     }
-    uint32_t fx_age_ms = fx_valid ? (now - fx.timestamp_ms) : 0xFFFFFFFFU;
 
     size_t n = 0U;
     /* VEH: informacje zwiazane z CAN, filtrem OBD i decyzja skrzydla. */
@@ -181,6 +193,15 @@ void DiagLog_Task(void)
                 (unsigned long)ctrl.open_remaining_ms,
                 (unsigned)ctrl.post_brake_hold_active,
                 (unsigned long)ctrl.post_remaining_ms);
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                " acc_src=%s acc_valid=%u",
+                acc.source == ACC_SOURCE_RAW_IMU ? "RAW" : "MFX",
+                (unsigned)acc.valid);
+    Diag_AddAge(diag_line, sizeof(diag_line), &n, "acc_age_ms", acc.age_ms, acc.sample_id != 0U);
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                " acc_sample_ms=%lu acc_seq=%lu acc_long_mg=%ld acc_lat_mg=%ld",
+                (unsigned long)acc.timestamp_ms, (unsigned long)acc.sample_id,
+                (long)acc.acc_longitudinal_mg, (long)acc.acc_lateral_mg);
     printf("%s\r\n", diag_line);
 
     /* IMU: pomiary w fizycznych osiach czujnika (X,Y,Z). */
@@ -208,14 +229,19 @@ void DiagLog_Task(void)
                 (unsigned long)imu.dma_timeout_count,
                 (unsigned long)imu.dma_abort_error_count,
                 (unsigned)imu.dma_recovering);
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                " sample_ms=%lu seq=%lu acc_valid=%u longRaw_mg=%ld latRaw_mg=%ld latFilt_mg=%ld",
+                (unsigned long)raw_acc.timestamp_ms, (unsigned long)raw_acc.sample_id,
+                (unsigned)raw_acc.valid, (long)imu.ax_mg, (long)imu.ay_mg,
+                (long)imu.lateral_filtered_mg);
     printf("%s\r\n", diag_line);
 
-    /* FX: ukl. wyjsciowy ENU zgodnie z knobs.output_type; NIE sa to osie IMU. */
+    // wektory biblioteki przed mapowaniem na pojazd
     n = 0U;
     Diag_Append(diag_line, sizeof(diag_line), &n,
-                "FX t_ms=%lu valid=%u age_ms=%ld",
-                (unsigned long)now, (unsigned)fx_valid,
-                (long)(fx_valid ? (int32_t)fx_age_ms : -1));
+                "IMU_FX t_ms=%lu valid=%u",
+                (unsigned long)now, (unsigned)fx_valid);
+    Diag_AddAge(diag_line, sizeof(diag_line), &n, "age_ms", fx_age_ms, fx_sample_id != 0U);
     Diag_Add3(diag_line, sizeof(diag_line), &n,
               "yaw_deg", (int32_t)(fx.yaw_deg * 1000.0f));
     Diag_Add3(diag_line, sizeof(diag_line), &n,
@@ -225,13 +251,23 @@ void DiagLog_Task(void)
     Diag_Add3(diag_line, sizeof(diag_line), &n,
               "gyroIntY_deg", (int32_t)(fx.gyro_y_integral_deg * 1000.0f));
     Diag_AddVec3(diag_line, sizeof(diag_line), &n,
-                 "linENU_g", (int32_t)(fx.linear_g[0] * 1000.0f),
+                 "linFX_g", (int32_t)(fx.linear_g[0] * 1000.0f),
                  (int32_t)(fx.linear_g[1] * 1000.0f),
                  (int32_t)(fx.linear_g[2] * 1000.0f));
     Diag_AddVec3(diag_line, sizeof(diag_line), &n,
-                 "gravENU_g", (int32_t)(fx.gravity_g[0] * 1000.0f),
+                 "gravFX_g", (int32_t)(fx.gravity_g[0] * 1000.0f),
                  (int32_t)(fx.gravity_g[1] * 1000.0f),
                  (int32_t)(fx.gravity_g[2] * 1000.0f));
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                " sample_ms=%lu seq=%lu src=MFX filter=%u divisor=%u"
+                " longRaw_mg=%ld latRaw_mg=%ld longFilt_mg=%ld latFilt_mg=%ld vert_mg=%ld",
+                (unsigned long)fx_sample_ms, (unsigned long)fx_sample_id,
+                (unsigned)MOTIONFX_FILTER_ENABLE, (unsigned)MOTIONFX_FILTER_DIVISOR,
+                (long)(fx.acc_longitudinal_g * 1000.0f),
+                (long)(fx.acc_lateral_g * 1000.0f),
+                (long)(fx.acc_longitudinal_filtered_g * 1000.0f),
+                (long)(fx.acc_lateral_filtered_g * 1000.0f),
+                (long)(fx.acc_vertical_g * 1000.0f));
     printf("%s\r\n", diag_line);
 }
 
