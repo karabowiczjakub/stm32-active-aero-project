@@ -2,7 +2,7 @@
 #define APP_CONFIG_H_
 
 #ifndef APP_LAP_SIM_ENABLED
-#define APP_LAP_SIM_ENABLED 0
+#define APP_LAP_SIM_ENABLED 1
 #endif
 
 /* Less than one 20 ms sample: never replay several stale lateral decisions. */

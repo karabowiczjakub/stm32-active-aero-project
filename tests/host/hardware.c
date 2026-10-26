@@ -1,6 +1,7 @@
 #include "main.h"
 #include "imu.h"
 #include "motion_fx_app.h"
+#include "uart_log.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,6 +21,110 @@ FDCAN_HandleTypeDef hfdcan1 = {FDCAN1};
 static uint8_t *dma_target;
 static uint16_t dma_reg, dma_size;
 static uint8_t queued_speed, rx_pending;
+
+USART_TypeDef host_usart;
+DMA_HandleTypeDef host_uart_dma = {HAL_DMA_STATE_READY};
+UART_HandleTypeDef hlpuart1 = {.Instance=LPUART1, .gState=HAL_UART_STATE_READY,
+                             .Lock=HAL_UNLOCKED, .hdmatx=&host_uart_dma};
+uint32_t host_uart_starts, host_uart_aborts;
+HAL_StatusTypeDef host_uart_start_status=HAL_OK, host_uart_abort_status=HAL_OK;
+uint8_t host_uart_abort_complete=1U, host_uart_mirror, host_uart_hold;
+const uint8_t *host_uart_data;
+uint16_t host_uart_size;
+uint8_t host_uart_output[262144];
+size_t host_uart_output_size;
+static uint8_t uart_dma_copy[UART_LOG_LINE_SIZE], uart_hardware_active;
+static uint32_t uart_start_tick;
+
+HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *h, const uint8_t *data, uint16_t size)
+{
+    assert(host_primask && h==&hlpuart1 && !uart_hardware_active);
+    assert(h->gState==HAL_UART_STATE_READY && host_uart_dma.State==HAL_DMA_STATE_READY);
+    assert(size && size<=sizeof(uart_dma_copy) && !(host_usart.CR3 & USART_CR3_DMAT));
+    if (host_uart_start_status!=HAL_OK) return host_uart_start_status;
+    host_uart_starts++;
+    host_uart_data=data;
+    host_uart_size=size;
+    memcpy(uart_dma_copy,data,size);
+    uart_hardware_active=1U;
+    uart_start_tick=host_tick;
+    h->gState=HAL_UART_STATE_BUSY_TX;
+    h->ErrorCode=HAL_UART_ERROR_NONE;
+    host_uart_dma.State=HAL_DMA_STATE_BUSY;
+    host_usart.CR3=USART_CR3_DMAT;
+    return HAL_OK;
+}
+
+void Host_UART_DMAComplete(void)
+{
+    assert(uart_hardware_active && host_uart_dma.State==HAL_DMA_STATE_BUSY);
+    assert(memcmp(host_uart_data,uart_dma_copy,host_uart_size)==0);
+    host_uart_dma.State=HAL_DMA_STATE_READY;
+    host_usart.CR3=0U;
+    host_usart.CR1=USART_CR1_TCIE;
+}
+
+void Host_UART_Complete(void)
+{
+    assert(uart_hardware_active);
+    if (host_uart_dma.State==HAL_DMA_STATE_BUSY) Host_UART_DMAComplete();
+    assert(host_uart_output_size+host_uart_size<=sizeof(host_uart_output));
+    memcpy(host_uart_output+host_uart_output_size,uart_dma_copy,host_uart_size);
+    host_uart_output_size+=host_uart_size;
+    if (host_uart_mirror) fwrite(uart_dma_copy,1,host_uart_size,stdout);
+    uart_hardware_active=0U;
+    host_usart.CR1=0U;
+    hlpuart1.gState=HAL_UART_STATE_READY;
+    HAL_UART_TxCpltCallback(&hlpuart1);
+}
+
+void Host_UART_AbortComplete(void)
+{
+    uart_hardware_active=0U;
+    host_usart.CR1=0U;
+    host_usart.CR3=0U;
+    host_uart_dma.State=HAL_DMA_STATE_READY;
+    hlpuart1.gState=HAL_UART_STATE_READY;
+}
+
+HAL_StatusTypeDef HAL_UART_AbortTransmit_IT(UART_HandleTypeDef *h)
+{
+    assert(host_primask && h==&hlpuart1);
+    host_uart_aborts++;
+    if (host_uart_abort_status!=HAL_OK) return host_uart_abort_status;
+    if (host_usart.CR3 & USART_CR3_DMAT)
+    {
+        host_usart.CR3=0U;
+        if (host_uart_abort_complete) Host_UART_AbortComplete();
+    }
+    else
+    {
+        host_usart.CR1=0U;
+        hlpuart1.gState=HAL_UART_STATE_READY;
+        if (host_uart_dma.State==HAL_DMA_STATE_READY) uart_hardware_active=0U;
+    }
+    return HAL_OK;
+}
+
+void Host_UART_Poll(void)
+{
+    if (!host_uart_hold && uart_hardware_active &&
+        (uint64_t)(uint32_t)(host_tick-uart_start_tick)*460800U >=
+        (uint64_t)host_uart_size*10000U) Host_UART_Complete();
+}
+
+void Host_UART_Drain(void)
+{
+    for (unsigned i=0;i<1000;i++)
+    {
+        UARTLog_Task();
+        UARTLog_Diag_t d;
+        UARTLog_GetDiagSnapshot(&d);
+        if (!d.queued && !d.recovering) return;
+        if (uart_hardware_active) Host_UART_Complete();
+    }
+    abort();
+}
 
 uint32_t HAL_GetTick(void) { return host_tick; }
 uint32_t __get_PRIMASK(void) { return host_primask; }
@@ -70,10 +175,14 @@ HAL_StatusTypeDef HAL_DMA_Abort_IT(DMA_HandleTypeDef *h)
     host_dma_abort_calls++;
     if (host_dma_abort_status != HAL_OK) return host_dma_abort_status;
     h->State=HAL_DMA_STATE_READY;
+    if (h==&host_uart_dma) uart_hardware_active=0U;
     return HAL_OK;
 }
 void Error_Handler(void) { abort(); }
 void BSP_LED_Toggle(uint32_t led) { (void)led; }
+void BSP_LED_On(uint32_t led) { (void)led; }
+HAL_StatusTypeDef HAL_TIM_Base_Start_IT(TIM_HandleTypeDef *timer)
+{ (void)timer; return HAL_OK; }
 HAL_StatusTypeDef HAL_TIM_PWM_Start(TIM_HandleTypeDef *timer, uint32_t channel)
 { (void)timer; (void)channel; return HAL_OK; }
 void Host_SetCompare(TIM_HandleTypeDef *timer, uint32_t channel, uint16_t pulse)
@@ -141,6 +250,7 @@ void Host_FeedIMU(int16_t lateral_raw)
     Host_CompleteIMU(3U, lateral_raw); IMU_Task();
 }
 #ifndef HOST_REAL_MOTIONFX
+uint8_t MotionFxApp_Init(void) { return 1U; }
 void MotionFxApp_Process(float ax, float ay, float az, float gx, float gy,
     float gz, uint32_t timestamp)
 {

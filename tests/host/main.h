@@ -11,6 +11,15 @@ typedef enum { HAL_UNLOCKED, HAL_LOCKED } HAL_LockTypeDef;
 typedef enum { HAL_I2C_MODE_NONE, HAL_I2C_MODE_MEM } HAL_I2C_ModeTypeDef;
 typedef struct { uint32_t CR1, ISR; } I2C_TypeDef;
 typedef struct { HAL_DMA_StateTypeDef State; } DMA_HandleTypeDef;
+typedef struct { uint32_t CR1, CR3; } USART_TypeDef;
+typedef enum { HAL_UART_STATE_READY, HAL_UART_STATE_BUSY_TX } HAL_UART_StateTypeDef;
+typedef struct {
+    USART_TypeDef *Instance;
+    HAL_UART_StateTypeDef gState;
+    HAL_LockTypeDef Lock;
+    DMA_HandleTypeDef *hdmatx;
+    uint32_t ErrorCode;
+} UART_HandleTypeDef;
 typedef struct {
     I2C_TypeDef *Instance;
     HAL_I2C_StateTypeDef State;
@@ -35,6 +44,12 @@ extern I2C_TypeDef host_i2c;
 #define I2C_FLAG_BUSY 1U
 #define I2C_CR1_RXDMAEN 2U
 #define RESET 0U
+#define USART_CR3_DMAT 1U
+#define USART_CR1_TCIE 2U
+#define HAL_UART_ERROR_NONE 0U
+#define HAL_UART_ERROR_DMA 16U
+#define HAL_UART_ERROR_FE 4U
+#define LPUART1 (&host_usart)
 #define __HAL_I2C_GET_FLAG(handle, flag) ((handle)->Instance->ISR & (flag))
 #define __HAL_RCC_CRC_CLK_ENABLE() ((void)0)
 #define TIM2 ((void *)2)
@@ -76,6 +91,25 @@ extern I2C_HandleTypeDef hi2c1;
 extern TIM_HandleTypeDef htim2, htim6, htim7;
 extern FDCAN_HandleTypeDef hfdcan1;
 extern DMA_HandleTypeDef host_dma;
+extern USART_TypeDef host_usart;
+extern UART_HandleTypeDef hlpuart1;
+extern DMA_HandleTypeDef host_uart_dma;
+extern uint32_t host_uart_starts, host_uart_aborts;
+extern HAL_StatusTypeDef host_uart_start_status, host_uart_abort_status;
+extern uint8_t host_uart_abort_complete, host_uart_mirror, host_uart_hold;
+extern const uint8_t *host_uart_data;
+extern uint16_t host_uart_size;
+extern uint8_t host_uart_output[262144];
+extern size_t host_uart_output_size;
+HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *, const uint8_t *, uint16_t);
+HAL_StatusTypeDef HAL_UART_AbortTransmit_IT(UART_HandleTypeDef *);
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *);
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *);
+void Host_UART_DMAComplete(void);
+void Host_UART_Complete(void);
+void Host_UART_AbortComplete(void);
+void Host_UART_Poll(void);
+void Host_UART_Drain(void);
 extern uint32_t host_dma_starts, host_abort_calls, host_dma_abort_calls, host_primask;
 extern HAL_StatusTypeDef host_read_dma_status, host_abort_status, host_dma_abort_status;
 extern void (*host_before_disable_hook)(void);
@@ -110,6 +144,9 @@ HAL_StatusTypeDef HAL_FDCAN_GetRxMessage(FDCAN_HandleTypeDef *, uint32_t, FDCAN_
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *);
 void BSP_PB_Callback(Button_TypeDef);
 void Host_MainLoopOnce(void);
+void Host_Boot(void);
+HAL_StatusTypeDef HAL_TIM_Base_Start_IT(TIM_HandleTypeDef *);
+void BSP_LED_On(uint32_t);
 void Host_FeedIMU(int16_t lateral_raw);
 void Host_QueueSpeed(uint8_t speed);
 #endif
