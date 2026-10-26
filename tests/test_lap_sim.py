@@ -24,7 +24,8 @@ def run(command):
     return result.stdout
 
 
-def compile_host(directory, mode, source_root=ROOT, test_source=None, defines=(), motionfx=False):
+def compile_host(directory, mode, source_root=ROOT, test_source=None, defines=(), motionfx=False,
+                 uart_capture=False):
     """Use the exact main-loop body/callbacks from main.c, replacing only its boot."""
     directory.mkdir(parents=True, exist_ok=True)
     main = (source_root / "Core/Src/main.c").read_text()
@@ -34,19 +35,28 @@ def compile_host(directory, mode, source_root=ROOT, test_source=None, defines=()
     loop = loop[1:]
     timer = main.split("/* USER CODE BEGIN 4 */", 1)[1].split("/* USER CODE END 4 */", 1)[0]
     button = main.split("void BSP_PB_Callback(Button_TypeDef Button)", 1)[1].split("/**", 1)[0]
+    boot = main.split("/* USER CODE BEGIN BSP */", 1)[1].split("/* USER CODE END BSP */", 1)[0]
     generated = directory / "app_loop.c"
     generated.write_text('#include "main.h"\n#include "app_config.h"\n#include "imu.h"\n'
                          '#include "wing_control.h"\n#include "obd.h"\n#include "servo.h"\n'
-                         '#include "diag_log.h"\n#include "lap_sim.h"\n'
-                         + pv + "\nvoid Host_MainLoopOnce(void) {\n" + loop + "\n}\n"
-                         + timer + "\nvoid BSP_PB_Callback(Button_TypeDef Button)" + button)
+                         '#include "diag_log.h"\n#include "lap_sim.h"\n#include "uart_log.h"\n'
+                         '#include "motion_fx_app.h"\n'
+                         + pv + "\nvoid Host_MainLoopOnce(void) {\n"
+                         + ("Host_UART_Poll();\n" if uart_capture else "")
+                         + loop + "\n}\n"
+                         + timer + "\nvoid BSP_PB_Callback(Button_TypeDef Button)" + button
+                         + "\nvoid Host_Boot(void) {\n" + boot + "\n}\n")
     production = []
-    for name in ("wing_control", "imu", "servo", "debug_utils", "diag_log", "obd", "lap_sim", "lap_data"):
+    for name in ("wing_control", "imu", "servo", "debug_utils", "diag_log", "obd", "lap_sim", "lap_data", "uart_log"):
         local = source_root / f"Core/Src/{name}.c"
         production.append(local if local.exists() else ROOT / f"Core/Src/{name}.c")
     if motionfx:
         production += [ROOT / "Core/Src/motion_fx_app.c", ROOT / "tests/host/motion_fx.c"]
         defines = (*defines, "-DHOST_REAL_MOTIONFX=1", "-I" + str(ROOT / "MotionFX/Inc"))
+    if uart_capture:
+        production.append(ROOT / "tests/host/uart_capture.c")
+        defines = (*defines, "-Wl,--wrap=printf", "-Wl,--wrap=__printf_chk",
+                   "-Wl,--wrap=puts", "-DHOST_UART_CAPTURE=1")
     executable = directory / "controller"
     run(["gcc", "-std=c11", "-O1", "-g", "-Wall", "-Wextra", "-Werror",
          "-Wno-unused-function", "-Wno-comment", "-fsanitize=undefined,float-cast-overflow",
