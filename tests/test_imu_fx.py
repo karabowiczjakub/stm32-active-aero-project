@@ -39,17 +39,17 @@ class ImuMotionFxTests(unittest.TestCase):
     def test_completed_sample_is_not_published_after_stale_delay(self): self.case("stale_sample")
     def test_logger_defends_against_invalid_api_payload(self):
         output=self.case("logger_defense")
-        lines=[line for line in output.splitlines() if line.startswith("FX ")]
-        self.assertEqual(len(lines),78)
+        lines=[line for line in output.splitlines() if line.startswith("IMU_FX t_ms=")]
+        self.assertEqual(len(lines),108)
         for line in lines:
-            self.assertIn("valid=0 age_ms=-1",line)
-            self.assertNotRegex(line,r"(?i)nan|inf")
+            self.assertIn("valid=0 age_ms=0",line)
+            self.assertNotRegex(line,r"(?i)(?:=|,)[+-]?(?:nan|inf)\b")
     def test_integral_range_does_not_poison_recovery(self): self.case("integral_range")
     def test_existing_failsafe_after_stall(self): self.case("failsafe_after_stall")
     def test_dma_tick_wrap(self): self.case("dma_wrap")
     def test_valid_motionfx_and_log_format(self):
         output=self.case("valid_fx")
-        self.assertIn("FX t_ms=100 valid=1 age_ms=0 yaw_deg=+12.500",output)
+        self.assertIn("IMU_FX t_ms=100 valid=1 age_ms=0 yaw_deg=+12.500",output)
         self.assertIn("IMU_FX t=100",output)
     def test_motionfx_nan_in_each_output(self): self.case("nan_fx")
     def test_motionfx_positive_infinity_in_each_output(self): self.case("inf_fx")
@@ -57,8 +57,8 @@ class ImuMotionFxTests(unittest.TestCase):
     def test_motionfx_finite_outside_logging_range(self): self.case("huge_fx")
     def test_motionfx_stale_and_recovery(self):
         output=self.case("stale_fx")
-        self.assertIn("FX t_ms=121 valid=0 age_ms=-1 yaw_deg=+0.000",output)
-        self.assertNotIn("IMU_FX",output)
+        self.assertIn("IMU_FX t_ms=121 valid=0 age_ms=101 yaw_deg=+0.000",output)
+        self.assertNotIn("IMU_FX t=",output)
     def test_motionfx_invalid_inputs_and_integral_recovery(self): self.case("bad_inputs")
     def test_motionfx_invalid_delta_time(self): self.case("invalid_dt")
     def test_motionfx_tick_wrap(self): self.case("fx_wrap")

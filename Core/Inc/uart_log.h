@@ -3,8 +3,8 @@
 
 #include <stdint.h>
 
-#define UART_LOG_LINE_SIZE 544U
-#define UART_LOG_QUEUE_SIZE 12U
+#define UART_LOG_LINE_SIZE 672U
+#define UART_LOG_QUEUE_SIZE 16U
 
 typedef struct
 {

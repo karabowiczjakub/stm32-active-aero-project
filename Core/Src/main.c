@@ -251,22 +251,9 @@ int main(void)
       }
 
 #endif
+      Control_Task();
       DiagLog_Task();
       UARTLog_Task();
-
-/*
-	    Servo_SetWingState(WING_NORMAL);
-	    printf("TEST: NORMAL\r\n");
-	    HAL_Delay(2000);
-
-	    Servo_SetWingState(WING_OPEN);
-	    printf("TEST: OPEN\r\n");
-	    HAL_Delay(2000);
-
-	    Servo_SetWingState(WING_AIR_BRAKE);
-	    printf("TEST: AIR_BRAKE\r\n");
-	    HAL_Delay(2000);
-*/
 
       __WFI();
     /* USER CODE END WHILE */
