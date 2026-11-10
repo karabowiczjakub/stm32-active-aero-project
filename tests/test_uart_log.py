@@ -55,7 +55,9 @@ class UartLogTests(unittest.TestCase):
                                 capture_output=True, check=True).stdout
         dma = subprocess.run([self.images[0, True], "integration"],
                              capture_output=True, check=True).stdout
-        self.assertEqual(dma, direct)
+        # kolejka istnieje tylko w wariancie dma
+        without_uart_counters = lambda data: re.sub(rb" uart_(?:drop|err|busy|q)=\d+", b"", data)
+        self.assertEqual(without_uart_counters(dma), without_uart_counters(direct))
         for prefix in ("VEH ", "IMU ", "IMU_FX ", "FAILSAFE ", "SERVO STATE"):
             self.assertIn(prefix.encode(), dma)
 

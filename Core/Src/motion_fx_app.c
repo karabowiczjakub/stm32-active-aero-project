@@ -94,6 +94,7 @@ uint8_t MotionFxApp_Init(void)
     knobs.LMode = 1U;
 
     knobs.modx = 1U;
+    knobs.ATime = MOTIONFX_ATIME;
 
     MotionFX_setKnobs(state, &knobs);
 

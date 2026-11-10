@@ -73,7 +73,8 @@ class ControllerTests(unittest.TestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="lap-host-")
         cls.directory = Path(cls.temp.name)
         cls.sim = compile_host(cls.directory / "sim", 1)
-        cls.normal = compile_host(cls.directory / "normal", 0)
+        cls.normal = compile_host(cls.directory / "normal", 0,
+                                  defines=("-DAPP_WING_CONTROL_MODE=0",))
 
     @classmethod
     def tearDownClass(cls):

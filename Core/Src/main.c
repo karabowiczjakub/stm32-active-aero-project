@@ -251,6 +251,7 @@ int main(void)
       }
 
 #endif
+      Control_Task();
       DiagLog_Task();
       UARTLog_Task();
 

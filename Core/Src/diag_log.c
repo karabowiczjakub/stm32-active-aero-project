@@ -12,6 +12,7 @@
 #include "servo.h"
 #include "motion_fx_app.h"
 #include "debug_utils.h"
+#include "uart_log.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -130,8 +131,13 @@ void DiagLog_Task(void)
     if (diag_first_log)
     {
         diag_first_log = 0U;
-        printf("LOG_INFO version=2 period_ms=%u units: speed=km/h; accel=g; *_mg=mg; gyro=deg/s; angles=deg; time=ms; fx_vectors=device; fx_map=Y,-X,Z provisional=1; control_acc=RAW\r\n",
-               (unsigned)DIAG_LOG_PERIOD_MS);
+        printf("LOG_INFO version=3 period_ms=%u units: speed=km/h; accel=g; *_mg=mg; gyro=deg/s; angles=deg; time=ms; fx_vectors=device; fx_map=Y,-X,Z provisional=1; brake_source=%s corner_source=RAW wing_mode=%s atime_x100=%ld fx_on_mg=%d fx_rearm_mg=%d fx_on_ms=%lu fx_rearm_ms=%lu obd_wait_ms=%lu obd_off_ms=%lu\r\n",
+               (unsigned)DIAG_LOG_PERIOD_MS,
+               APP_WING_CONTROL_MODE == WING_CONTROL_HYBRID_ACTIVE ? "HYBRID" : "OBD",
+               Control_ModeToString(), (long)(MOTIONFX_ATIME * 100.0f),
+               HYBRID_FX_ON_MG, HYBRID_FX_REARM_MG,
+               (unsigned long)HYBRID_FX_ON_CONFIRM_MS, (unsigned long)HYBRID_FX_REARM_CONFIRM_MS,
+               (unsigned long)HYBRID_OBD_CONFIRM_MS, (unsigned long)HYBRID_OBD_OFF_CONFIRM_MS);
     }
 
     OBD_Diag_t obd = {0};
@@ -268,6 +274,35 @@ void DiagLog_Task(void)
                 (long)(fx.acc_longitudinal_filtered_g * 1000.0f),
                 (long)(fx.acc_lateral_filtered_g * 1000.0f),
                 (long)(fx.acc_vertical_g * 1000.0f));
+    printf("%s\r\n", diag_line);
+
+    Control_CompareDiag_t comparison;
+    UARTLog_Diag_t uart;
+    Control_GetCompareSnapshot(&comparison);
+    UARTLog_GetDiagSnapshot(&uart);
+    n = 0U;
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                "CTRL_CMP t_ms=%lu mode=%s corner_raw=%u"
+                " wing_legacy=%s wing_hybrid=%s wing_actual=%s brake_legacy=%u brake_hybrid=%u"
+                " hybrid_enabled=%u fx_valid=%u fx_age_ms=",
+                (unsigned long)now, Control_ModeToString(), (unsigned)comparison.corner_raw,
+                WingState_ToString(comparison.wing_legacy), WingState_ToString(comparison.wing_hybrid),
+                WingState_ToString(ctrl.wing_state), (unsigned)comparison.brake_legacy,
+                (unsigned)comparison.brake_hybrid, (unsigned)comparison.hybrid_enabled, (unsigned)fx_valid);
+    if (fx_sample_id) Diag_Append(diag_line, sizeof(diag_line), &n, "%lu", (unsigned long)fx_age_ms);
+    else Diag_Append(diag_line, sizeof(diag_line), &n, "-1");
+    Diag_Append(diag_line, sizeof(diag_line), &n,
+                " fx_seq=%lu flags_legacy=%u flags_hybrid=%u flags_fx=%u phase=%u"
+                " armed=%u on_pending=%u off_pending=%u wait_ms=%lu early=%lu confirmed=%lu rejected=%lu"
+                " uart_drop=%lu uart_err=%lu uart_busy=%lu uart_q=%u",
+                (unsigned long)fx_sample_id, (unsigned)comparison.faults_legacy,
+                (unsigned)comparison.faults_hybrid, (unsigned)comparison.faults_fx,
+                (unsigned)comparison.phase, (unsigned)comparison.fx_armed,
+                (unsigned)comparison.on_pending, (unsigned)comparison.off_pending,
+                (unsigned long)comparison.wait_remaining_ms, (unsigned long)comparison.fx_early_count,
+                (unsigned long)comparison.obd_confirm_count, (unsigned long)comparison.fx_reject_count,
+                (unsigned long)uart.dropped_count, (unsigned long)uart.error_count,
+                (unsigned long)uart.busy_count, (unsigned)uart.queued);
     printf("%s\r\n", diag_line);
 }
 

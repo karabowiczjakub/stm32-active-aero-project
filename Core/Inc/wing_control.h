@@ -23,12 +23,17 @@ void Control_ForceNormalForCorner(void);
 void Control_Update_From_SpeedAt(uint8_t speed_kmh, uint32_t tick_ms);
 void Control_Reset(void);
 void Control_CheckDataFreshness(void);
+void Control_Task(void);
+const char *Control_ModeToString(void);
 
 #define CONTROL_FAULT_OBD_MISSING 1U
 #define CONTROL_FAULT_OBD_STALE   2U
 #define CONTROL_FAULT_IMU_MISSING 4U
 #define CONTROL_FAULT_IMU_STALE   8U
 #define CONTROL_FAULT_RATE       16U
+#define CONTROL_FAULT_FX_MISSING 32U
+#define CONTROL_FAULT_FX_STALE   64U
+#define CONTROL_FAULT_FX_INVALID 128U
 
 
 typedef struct
@@ -49,5 +54,24 @@ typedef struct
 } Control_Diag_t;
 
 void Control_GetDiagSnapshot(Control_Diag_t *out);
+
+typedef enum
+{
+    CONTROL_HYBRID_IDLE = 0,
+    CONTROL_HYBRID_WAIT_OBD,
+    CONTROL_HYBRID_OBD
+} Control_HybridPhase_t;
+
+typedef struct
+{
+    WingState_t wing_legacy, wing_hybrid;
+    uint8_t brake_legacy, brake_hybrid, corner_raw;
+    uint8_t faults_legacy, faults_hybrid, faults_fx;
+    uint8_t hybrid_enabled, fx_armed, on_pending, off_pending;
+    Control_HybridPhase_t phase;
+    uint32_t wait_remaining_ms, fx_early_count, obd_confirm_count, fx_reject_count;
+} Control_CompareDiag_t;
+
+void Control_GetCompareSnapshot(Control_CompareDiag_t *out);
 
 #endif /* WING_CONTROL_H_ */

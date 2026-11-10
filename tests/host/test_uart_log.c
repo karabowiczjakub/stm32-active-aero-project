@@ -112,7 +112,7 @@ static void exact_limit(void)
 
 static void ring_wrap(void)
 {
-    char expected[4096]; size_t used=0U;
+    char expected[UART_LOG_QUEUE_SIZE * 20U * 32U]; size_t used=0U;
     for (unsigned cycle=0;cycle<20U;cycle++)
     {
         for (unsigned i=0;i<UART_LOG_QUEUE_SIZE;i++)
